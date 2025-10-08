@@ -1,2 +1,2 @@
 # Transitly
-mover buddy
+Mover buddy
