@@ -1,230 +1,248 @@
-from langchain_core.messages import HumanMessage, ToolMessage, SystemMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
+# Amazon_address_change_agent.py
+from __future__ import annotations
+from typing import Dict, Any, Optional, List
+from pydantic.v1 import BaseModel, Field
+from langchain_core.messages import AIMessage
 from langgraph.graph import StateGraph, END
-from agent_state import AgentState
+from langgraph.checkpoint.memory import MemorySaver
+# from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
+
+from agent_state import AgentState, ChecklistItem
 from tools import update_amazon_address
 from config import Config
-from typing import Dict, Any, Optional
 
+
+AGENT_LABEL = "amazon_address_change"  # must match your registry / planner
+
+
+# ---------- LLM controller (structured) ----------
+
+class AddressDecision(BaseModel):
+    """
+    Structured decision for whether we can safely call the tool.
+    """
+    new_address: Optional[str] = Field(
+        default=None,
+        description="Best-effort normalized new address for Amazon. Use user_details.to_address when available."
+    )
+    proceed: bool = Field(
+        default=False,
+        description="True if it's safe and appropriate to call update_amazon_address now."
+    )
+    reason: str = Field(default="")
+    needed_fields: List[str] = Field(
+        default_factory=list,
+        description="List of missing fields required before proceeding (e.g., ['user_id','user_details.to_address'])."
+    )
+
+
+SUPERVISOR_SYSTEM = """You are the Amazon Address Change Agent controller.
+Your job: decide if we have enough information to call the tool `update_amazon_address`.
+- Prefer `user_details.to_address` as the new address when present.
+- Otherwise extract a reasonable new address from recent messages if unambiguous.
+- Only set proceed=true if confident; otherwise list needed_fields.
+- Return strict JSON only per the schema.
+"""
+
+
+# ---------- Checklist helpers ----------
+
+def _update_checklist_status_delta(state: AgentState, new_status: str, detail: Optional[str] = None) -> Dict[str, Any]:
+    """
+    If there's a checklist item tagged for this agent, update its status and optional detail.
+    Returns a partial state delta; safe to merge into the graph delta.
+    """
+    cl = state.get("checklist") or []
+    if not cl:
+        return {}
+
+    changed = False
+    new_list: List[ChecklistItem] = []
+    for item in cl:
+        # item is a Pydantic model (ChecklistItem)
+        if getattr(item, "agent_label", None) == AGENT_LABEL:
+            if item.status != new_status or (detail and item.detail != detail):
+                new_item = item.copy(update={"status": new_status, "detail": detail or item.detail})
+                new_list.append(new_item)
+                changed = True
+            else:
+                new_list.append(item)
+        else:
+            new_list.append(item)
+
+    return {"checklist": new_list} if changed else {}
+
+
+# ---------- The agent (tiny 2-node graph) ----------
 
 class AmazonAddressChangeAgent:
     """
-    A class-based Amazon address change agent that handles address updates
-    through a conversational interface using LangGraph.
+    LLM-steered, idempotent agent:
+    1) Decide & extract address (structured output).
+    2) If proceed, call the tool once and write results to state.
     """
-    
+
     def __init__(self, model_name: Optional[str] = None):
-        """
-        Initialize the Amazon Address Change Agent.
-        
-        Args:
-            model_name: Optional model name override. Defaults to Config.CHAT_MODEL
-        """
         self.model_name = model_name or Config.CHAT_MODEL
-        self.tools = [update_amazon_address]
-        self.tool_map = {tool.name: tool for tool in self.tools}
-        
-        # Initialize LLM
-        self.llm = ChatGoogleGenerativeAI(model=self.model_name)
-        self.llm_with_tools = self.llm.bind_tools(self.tools)
-        
-        # System prompt
-        self.system_text = (
-            "You are the Amazon address change agent. "
-            "If the user provides a new address, call the `update_amazon_address` tool with the user_id and new_address. "
-            "After the tool returns, summarize the result and ask the user to confirm whether the address looks correct. "
-            "Do not proceed with further tool calls until the user confirms."
-        )
-        
-        # Build and compile the graph
+        self.llm = ChatOpenAI(model=self.model_name)
         self.app = self._build_graph()
-    
-    def _call_model(self, state: AgentState) -> AgentState:
-        """
-        Call the language model with the current state.
-        
-        Args:
-            state: Current agent state
-            
-        Returns:
-            Updated state with model response
-        """
-        # Always pass the full history, prefixed by system
-        history = state.get("messages", [])
-        if not history or not isinstance(history[0], SystemMessage):
-            history = [SystemMessage(content=self.system_text)] + history
 
-        response = self.llm_with_tools.invoke(history)
-        return {"messages": [response]}
-    
-    def _execute_tools_for_amazon_address_change(self, state: AgentState) -> AgentState:
-        """
-        Execute tools for Amazon address change operations.
-        
-        Args:
-            state: Current agent state
-            
-        Returns:
-            Updated state with tool results
-        """
-        last = state["messages"][-1]
+    # Node 1: decide & extract candidate address
+    def _decide(self, state: AgentState) -> AgentState:
+        user_details = state.get("user_details", {})
+        messages_text = "\n".join(
+            getattr(m, "content", "") for m in state.get("messages", []) if hasattr(m, "content")
+        )
 
-        # Nothing to do: return an empty delta (don't return the whole state)
-        if not getattr(last, "tool_calls", None):
+        # Prefer existing success/idempotency skip
+        already_ok = bool(state.get("address_change_result", {}).get("success"))
+        current_to = user_details.get("to_address")
+        current_saved = user_details.get("address")
+
+        # If already updated to the same address, just mark done
+        if already_ok and current_saved and current_to and current_saved.strip() == current_to.strip():
+            summary = "[amazon_address_change] Already updated to target address; no action."
+            delta = {
+                "messages": [AIMessage(content=summary)],
+            }
+            delta.update(_update_checklist_status_delta(state, "done", "Already updated"))
+            # No need to carry a decision
+            return delta
+
+        # Ask the LLM to compute a decision (structured)
+        decision = self.llm.with_structured_output(AddressDecision).invoke(
+            [
+                {"role": "system", "content": SUPERVISOR_SYSTEM},
+                {"role": "user", "content": f"User details: {user_details}\n\nRecent messages:\n{messages_text}\nReturn JSON only."}
+            ]
+        )
+
+        # Stash decision into state (namespaced scratch)
+        out: AgentState = {
+            "amazon_scratch": {
+                "candidate_address": decision.new_address,
+                "proceed": bool(decision.proceed),
+                "reason": decision.reason,
+                "needed_fields": decision.needed_fields,
+            }
+        }
+
+        # If we cannot proceed, emit a helpful message and mark checklist blocked
+        if not decision.proceed or not decision.new_address:
+            msg = (
+                "[amazon_address_change] Missing info; not proceeding.\n"
+                f"reason={decision.reason}\n"
+                f"needed_fields={decision.needed_fields}"
+            )
+            out["messages"] = [AIMessage(content=msg)]
+            out.update(_update_checklist_status_delta(state, "blocked", decision.reason))
+        return out
+
+    # Node 2: maybe call tool (idempotent)
+    def _maybe_call_tool(self, state: AgentState) -> AgentState:
+        scratch = state.get("amazon_scratch", {}) or {}
+        proceed = bool(scratch.get("proceed"))
+        new_address = scratch.get("candidate_address")
+
+        if not proceed or not new_address:
+            # nothing to do
             return {}
 
-        tool_msgs = []
-        updated_user_details = state.get("user_details", {})
-        updated_result = state.get("address_change_result", {})
+        uid = state.get("user_id")
+        # Idempotency: if address_change_result already success & same address → no-op
+        prev = state.get("address_change_result", {}) or {}
+        if prev.get("success") and state.get("user_details", {}).get("address") == new_address:
+            msg = "[amazon_address_change] No-op; already set to desired address."
+            out: AgentState = {"messages": [AIMessage(content=msg)]}
+            out.update(_update_checklist_status_delta(state, "done", "No-op"))
+            return out
 
-        for tc in last.tool_calls:
-            name = tc.get("name")
-            args = tc.get("args", {}) or {}
+        # Call the tool safely
+        try:
+            result = update_amazon_address.invoke({"new_address": new_address, "user_id": uid})
+        except Exception as e:
+            result = {"success": False, "error": f"{type(e).__name__}: {e}"}
 
-            tool = self.tool_map.get(name)
-            if tool is None:
-                tool_msgs.append(
-                    ToolMessage(content=f"Unknown tool: {name}", tool_call_id=tc["id"])
+        # Update state projections
+        ud = dict(state.get("user_details", {}) or {})
+        if result.get("success"):
+            ud["address"] = result.get("address", new_address)
+
+        out: AgentState = {
+            "user_details": ud,
+            "address_change_result": {
+                "success": bool(result.get("success")),
+                "data": result,
+                "error": result.get("error"),
+            },
+            "messages": [
+                AIMessage(
+                    content=f"[amazon_address_change] {'OK' if result.get('success') else 'FAILED'} → {result}"
                 )
-                continue
+            ],
+        }
 
-            # Run tool safely
-            try:
-                result = tool.invoke(args)
-            except Exception as e:
-                result = {"success": False, "error": f"{type(e).__name__}: {e}"}
-
-            # Domain-specific state updates
-            if name == "update_amazon_address":
-                updated_user_details = {
-                    **updated_user_details,
-                    "address": result.get("address", args.get("new_address"))
-                }
-                updated_result = {
-                    "success": bool(result.get("success")),
-                    "data": result,
-                    "error": result.get("error")
-                }
-
-            # Surface tool output to the model in the next turn
-            tool_msgs.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
-
-        # Return only what changed; add_messages will append tool_msgs
-        out: AgentState = {"messages": tool_msgs}
-        if updated_user_details != state.get("user_details"):
-            out["user_details"] = updated_user_details
-        if updated_result:
-            out["address_change_result"] = updated_result
+        # Update checklist status accordingly
+        if result.get("success"):
+            out.update(_update_checklist_status_delta(state, "done", "Amazon address updated"))
+        else:
+            out.update(_update_checklist_status_delta(state, "failed", str(result.get("error")) or "Tool failed"))
 
         return out
-    
+
     def _should_continue(self, state: AgentState) -> str:
-        """
-        Determine whether to continue with tool execution or end.
-        
-        Args:
-            state: Current agent state
-            
-        Returns:
-            Next node name or "end"
-        """
-        last = state["messages"][-1]
-        if getattr(last, "tool_calls", None):
-            return "execute_tools_for_amazon_address_change"
+        # If we have a proceed=true decision, go call the tool; else end.
+        scratch = state.get("amazon_scratch", {}) or {}
+        if scratch.get("proceed") and scratch.get("candidate_address"):
+            return "maybe_call_tool"
         return "end"
-    
+
     def _build_graph(self) -> StateGraph:
-        """
-        Build and compile the LangGraph state graph.
-        
-        Returns:
-            Compiled graph application
-        """
-        graph = StateGraph(AgentState)
-        graph.add_node("call_model", self._call_model)
-        graph.add_node("execute_tools_for_amazon_address_change", self._execute_tools_for_amazon_address_change)
-
-        graph.set_entry_point("call_model")
-
-        graph.add_conditional_edges(
-            "call_model",
+        g = StateGraph(AgentState)
+        g.add_node("decide", self._decide)
+        g.add_node("maybe_call_tool", self._maybe_call_tool)
+        g.set_entry_point("decide")
+        g.add_conditional_edges(
+            "decide",
             self._should_continue,
             {
-                "execute_tools_for_amazon_address_change": "execute_tools_for_amazon_address_change",
+                "maybe_call_tool": "maybe_call_tool",
                 "end": END,
             }
         )
+        # single pass; after tool call we end
+        g.add_edge("maybe_call_tool", END)
+        return g.compile()
 
-        # After executing tools, call the model again to ask for confirmation / finalize
-        graph.add_edge("execute_tools_for_amazon_address_change", "call_model")
-
-        return graph.compile()
-    
+    # Public API
     def run(self, initial_state: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Run the agent with the given initial state.
-        
-        Args:
-            initial_state: Initial state dictionary
-            
-        Returns:
-            Final state after agent execution
-        """
         return self.app.invoke(initial_state)
-    
+
     def update_address(self, user_id: str, new_address: str, current_address: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Convenience method to update a user's Amazon address.
-        
-        Args:
-            user_id: User ID
-            new_address: New address to set
-            current_address: Current address (optional)
-            
-        Returns:
-            Final state after address update
-        """
         initial_state = {
-            "messages": [
-                HumanMessage(content=f"Please update my Amazon address to {new_address}.")
-            ],
+            "messages": [],
             "user_id": user_id,
-            "user_details": {"address": current_address or ""},
+            "user_details": {"address": current_address or "", "to_address": new_address},
             "address_change_result": {"success": False, "data": {}, "error": None},
         }
-        
         return self.run(initial_state)
 
 
-# --- Example usage ---
+# --- Self-test (optional) ---
 if __name__ == "__main__":
-    # Create agent instance
     agent = AmazonAddressChangeAgent()
-    
-    # Method 1: Using the convenience method
-    result = agent.update_address(
-        user_id="12345",
-        new_address="456 Oak Ave, Springfield, USA",
-        current_address="123 Main St, Anytown, USA"
-    )
-    
-    print("=== Using convenience method ===")
-    print("Final message:", result["messages"][-1].content)
-    print("State address:", result.get("user_details", {}).get("address"))
-    print("Tool result:", result.get("address_change_result"))
-    
-    # Method 2: Using the run method with custom state
-    print("\n=== Using run method ===")
-    custom_state = {
-        "messages": [
-            HumanMessage(content="Please update my Amazon address to 789 Pine St, Boston, MA.")
-        ],
-        "user_id": "67890",
-        "user_details": {"address": "456 Oak Ave, Springfield, USA"},
+    demo = {
+        "messages": [AIMessage(content="Please update my Amazon address.")],
+        "user_id": "22222",
+        "user_details": {
+            "name": "John Doe",
+            "from_address": "123 Main St",
+            "to_address": "456 Oak Ave, Springfield, USA"
+        },
+        "checklist": [ChecklistItem(title="Update Amazon address", status="todo", agent_label=AGENT_LABEL)],
         "address_change_result": {"success": False, "data": {}, "error": None},
     }
-    
-    result2 = agent.run(custom_state)
-    print("Final message:", result2["messages"][-1].content)
-    print("State address:", result2.get("user_details", {}).get("address"))
-    print("Tool result:", result2.get("address_change_result"))
+    out = agent.run(demo)
+    print(out.get("address_change_result"))
+    print(out.get("user_details"))
