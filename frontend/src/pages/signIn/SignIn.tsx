@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import Button from "../../components/button";
 import Input from "../../components/input";
 import Modal from "../../components/modal";
+import Notification from "../../components/notification";
 import { useUser } from "../../context/user.tsx";
 import { authService, ApiError } from '../../services/auth';
 
@@ -11,15 +12,18 @@ export default function SignIn() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [notification, setNotification] = useState<{
+    show: boolean;
+    message: string;
+    type: 'success' | 'error';
+  }>({ show: false, message: '', type: 'success' });
   const navigate = useNavigate();
   const location = useLocation();
 
   useEffect(() => {
     // Check for success message from confirmation page
     if (location.state?.message) {
-      setSuccessMessage(location.state.message);
+      setNotification({ show: true, message: location.state.message, type: 'success' });
       // Clear the location state
       navigate(location.pathname, { replace: true, state: {} });
     }
@@ -29,12 +33,11 @@ export default function SignIn() {
 
   const handleSignIn = async () => {
     if (!email || !password) {
-      setError('Please enter both email and password');
+      setNotification({ show: true, message: 'Please enter both email and password', type: 'error' });
       return;
     }
 
     setIsLoading(true);
-    setError(null);
 
     try {
       const response = await authService.signIn({
@@ -51,12 +54,12 @@ export default function SignIn() {
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.message.includes('not confirmed')) {
-          setError('Please confirm your email address before signing in.');
+          setNotification({ show: true, message: 'Please confirm your email address before signing in.', type: 'error' });
         } else {
-          setError(err.message);
+          setNotification({ show: true, message: err.message, type: 'error' });
         }
       } else {
-        setError('An unexpected error occurred. Please try again.');
+        setNotification({ show: true, message: 'An unexpected error occurred. Please try again.', type: 'error' });
       }
     } finally {
       setIsLoading(false);
@@ -82,17 +85,6 @@ export default function SignIn() {
         onClose={() => {}}
       >
         <div className="space-y-6">
-          {successMessage && (
-            <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg">
-              {successMessage}
-            </div>
-          )}
-          
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-              {error}
-            </div>
-          )}
           
           <div className="space-y-4">
             <Input
@@ -143,6 +135,13 @@ export default function SignIn() {
           </div>
         </div>
       </Modal>
+      
+      <Notification
+        message={notification.message}
+        type={notification.type}
+        isVisible={notification.show}
+        onClose={() => setNotification(prev => ({ ...prev, show: false }))}
+      />
     </div>
   );
 }

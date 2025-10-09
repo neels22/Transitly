@@ -3,12 +3,17 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import Button from "../../components/button";
 import Input from "../../components/input";
 import Modal from "../../components/modal";
+import Notification from "../../components/notification";
 import { authService, ApiError } from '../../services/auth';
 
 export default function ConfirmEmail() {
   const [confirmationCode, setConfirmationCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [notification, setNotification] = useState<{
+    show: boolean;
+    message: string;
+    type: 'success' | 'error';
+  }>({ show: false, message: '', type: 'error' });
   const navigate = useNavigate();
   const location = useLocation();
   
@@ -24,12 +29,11 @@ export default function ConfirmEmail() {
 
   const handleConfirmSignUp = async () => {
     if (!confirmationCode) {
-      setError('Please enter the confirmation code');
+      setNotification({ show: true, message: 'Please enter the confirmation code', type: 'error' });
       return;
     }
 
     setIsLoading(true);
-    setError(null);
 
     try {
       await authService.confirmSignUp({
@@ -45,9 +49,9 @@ export default function ConfirmEmail() {
       });
     } catch (err) {
       if (err instanceof ApiError) {
-        setError(err.message);
+        setNotification({ show: true, message: err.message, type: 'error' });
       } else {
-        setError('An unexpected error occurred. Please try again.');
+        setNotification({ show: true, message: 'An unexpected error occurred. Please try again.', type: 'error' });
       }
     } finally {
       setIsLoading(false);
@@ -56,16 +60,15 @@ export default function ConfirmEmail() {
 
   const handleResendCode = async () => {
     setIsLoading(true);
-    setError(null);
 
     try {
       await authService.resendConfirmation({ username });
-      setError('Confirmation code sent! Check your email.');
+      setNotification({ show: true, message: 'Confirmation code sent! Check your email.', type: 'success' });
     } catch (err) {
       if (err instanceof ApiError) {
-        setError(err.message);
+        setNotification({ show: true, message: err.message, type: 'error' });
       } else {
-        setError('Failed to resend confirmation code.');
+        setNotification({ show: true, message: 'Failed to resend confirmation code.', type: 'error' });
       }
     } finally {
       setIsLoading(false);
@@ -97,15 +100,6 @@ export default function ConfirmEmail() {
             </p>
           </div>
           
-          {error && (
-            <div className={`border px-4 py-3 rounded-lg ${
-              error.includes('sent') 
-                ? 'bg-green-50 border-green-200 text-green-700'
-                : 'bg-red-50 border-red-200 text-red-700'
-            }`}>
-              {error}
-            </div>
-          )}
           
           <div className="space-y-4">
             <Input
@@ -137,6 +131,13 @@ export default function ConfirmEmail() {
           </div>
         </div>
       </Modal>
+      
+      <Notification
+        message={notification.message}
+        type={notification.type}
+        isVisible={notification.show}
+        onClose={() => setNotification(prev => ({ ...prev, show: false }))}
+      />
     </div>
   );
 }
