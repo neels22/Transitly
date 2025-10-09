@@ -18,6 +18,8 @@ class AgentState(TypedDict, total=False):
     user_details: Dict[str, Any]
     checklist: List[ChecklistItem]
     last_task: str           # e.g. "get_user_details" | "gen_checklist" | "address_change"
+    reason: str
+    next_task: str
     address_change_result: Dict[str, Any]  # {success: bool, data:..., error:...}
 
 
