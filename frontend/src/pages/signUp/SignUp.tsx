@@ -3,11 +3,16 @@ import { useNavigate } from 'react-router-dom';
 import Button from "../../components/button";
 import Input from "../../components/input";
 import Modal from "../../components/modal";
+import Notification from "../../components/notification";
 import { authService, ApiError } from '../../services/auth';
 
 export default function SignUp() {
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [notification, setNotification] = useState<{
+    show: boolean;
+    message: string;
+    type: 'success' | 'error';
+  }>({ show: false, message: '', type: 'error' });
   const navigate = useNavigate();
   
   // Sign up form fields
@@ -20,17 +25,16 @@ export default function SignUp() {
 
   const handleSignUp = async () => {
     if (!username || !firstName || !lastName || !email || !password) {
-      setError('Please fill in all fields');
+      setNotification({ show: true, message: 'Please fill in all fields', type: 'error' });
       return;
     }
 
     if (password.length < 8) {
-      setError('Password must be at least 8 characters long');
+      setNotification({ show: true, message: 'Password must be at least 8 characters long', type: 'error' });
       return;
     }
 
     setIsLoading(true);
-    setError(null);
 
     try {
       await authService.signUp({
@@ -46,9 +50,9 @@ export default function SignUp() {
       });
     } catch (err) {
       if (err instanceof ApiError) {
-        setError(err.message);
+        setNotification({ show: true, message: err.message, type: 'error' });
       } else {
-        setError('An unexpected error occurred. Please try again.');
+        setNotification({ show: true, message: 'An unexpected error occurred. Please try again.', type: 'error' });
       }
     } finally {
       setIsLoading(false);
@@ -65,11 +69,6 @@ export default function SignUp() {
         onClose={() => {}}
       >
         <div className="space-y-6">
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-              {error}
-            </div>
-          )}
           
           <div className="space-y-4">
             <Input
@@ -151,6 +150,13 @@ export default function SignUp() {
           </div>
         </div>
       </Modal>
+      
+      <Notification
+        message={notification.message}
+        type={notification.type}
+        isVisible={notification.show}
+        onClose={() => setNotification(prev => ({ ...prev, show: false }))}
+      />
     </div>
   );
 }
