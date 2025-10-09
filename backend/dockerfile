@@ -1,0 +1,33 @@
+# Keep pip cache small
+# Tells pip not to cache packages → smaller image size.
+# ENV PIP_NO_CACHE_DIR=1
+# Prevents .pyc files from being generated. Not needed inside Docker.
+# ENV PYTHONDONTWRITEBYTECODE=1
+# Ensures logs are printed immediately to the console, helpful for debugging.
+# ENV PYTHONUNBUFFERED=1 
+
+# Base image with Python
+FROM python:3.12-slim
+
+# Create app dir inside the container to /app. All following commands (COPY, RUN, CMD) run from this folder. Makes app self-contained inside /app.
+WORKDIR /app
+
+# Copy requirements (create backend/requirements.txt)
+COPY requirements.txt .
+
+# Install dependencies
+RUN pip install --upgrade pip
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Installs OS-level tools (build-essential, curl) needed to build some Python packages.
+# Some Python packages have C extensions; build-essential provides compilers. rm -rf cleans up cache to keep image small.
+RUN apt-get update && apt-get install -y build-essential curl && rm -rf /var/lib/apt/lists/*
+
+# Copy all code
+COPY . .
+
+# Expose port
+EXPOSE 8000
+
+# Run FastAPI with reload
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
