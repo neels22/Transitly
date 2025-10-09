@@ -1,8 +1,8 @@
 # checklist_agent.py
 from langchain_core.prompts import ChatPromptTemplate
 from agent_state import AgentState, ChecklistItem
-# from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
+# from langchain_openai import ChatOpenAI
 from config import Config
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage
@@ -41,8 +41,8 @@ class ChecklistOutput(BaseModel):
 class ChecklistAgent:
     def __init__(self, model_name: Optional[str] = None):
         self.model_name = model_name or Config.CHAT_MODEL
-        # self.llm = ChatGoogleGenerativeAI(model=self.model_name)
-        self.llm = ChatOpenAI(model=self.model_name)
+        self.llm = ChatGoogleGenerativeAI(model=self.model_name)
+        # self.llm = ChatOpenAI(model=self.model_name)
         self.app = self._build_graph()
 
     def _get_checklist_node(self, state: AgentState) -> AgentState:

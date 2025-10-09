@@ -2,7 +2,8 @@
 from __future__ import annotations
 from typing import Dict, Any, Optional, List
 from pydantic.v1 import BaseModel, Field
-from langchain_openai import ChatOpenAI
+# from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import AIMessage
 from langgraph.graph import StateGraph, END
 
@@ -76,7 +77,7 @@ class GetUserDetailAgent:
 
     def __init__(self, model_name: Optional[str] = None):
         self.model_name = model_name or Config.CHAT_MODEL
-        self.llm = ChatOpenAI(model=self.model_name)
+        self.llm = ChatGoogleGenerativeAI(model=self.model_name)
         self.app = self._build_graph()
 
     # Node 1: Decide

@@ -2,7 +2,7 @@
 
 from typing import Dict, Literal, Optional
 from pydantic.v1 import BaseModel, Field
-# from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.graph import StateGraph, END
@@ -28,8 +28,8 @@ WORKERS: Dict[str, Dict[str, str]] = {
 }
 
 # --- LLM for supervision ---
-# llm = ChatGoogleGenerativeAI(model=Config.CHAT_MODEL)
-llm = ChatOpenAI(model=Config.CHAT_MODEL)
+llm = ChatGoogleGenerativeAI(model=Config.CHAT_MODEL)
+# llm = ChatOpenAI(model=Config.CHAT_MODEL)
 
 class SupervisorChoice(BaseModel):
     next_task: str = Field(
@@ -239,7 +239,7 @@ def run_orchestrator_agent(initial_state: AgentState) -> AgentState:
 
 if __name__ == "__main__":
     initial_state = {
-        "messages": [HumanMessage(content="Get me the details for user 12345 and update my Amazon address to 789 Pine St, Boston, MA.")],
+        "messages": [HumanMessage(content="Get me the details for user 12345")],
         "user_id": "12345",
         "user_details": {}
     }

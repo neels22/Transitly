@@ -5,8 +5,8 @@ from pydantic.v1 import BaseModel, Field
 from langchain_core.messages import AIMessage
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
-# from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
+# from langchain_openai import ChatOpenAI
 
 from agent_state import AgentState, ChecklistItem
 from tools import update_amazon_address
@@ -85,7 +85,7 @@ class AmazonAddressChangeAgent:
 
     def __init__(self, model_name: Optional[str] = None):
         self.model_name = model_name or Config.CHAT_MODEL
-        self.llm = ChatOpenAI(model=self.model_name)
+        self.llm = ChatGoogleGenerativeAI(model=self.model_name)
         self.app = self._build_graph()
 
     # Node 1: decide & extract candidate address

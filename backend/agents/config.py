@@ -13,8 +13,8 @@ class Config:
     # RECORDING_DURATION = 10
 
     # LLM Models
-    # CHAT_MODEL = "gemini-2.5-flash"
-    CHAT_MODEL = "gpt-4o-mini"
+    CHAT_MODEL = "gemini-2.5-flash"
+    # CHAT_MODEL = "gpt-4o-mini"
     # VOICE_MODEL = "gpt-4o-mini"
     # PLANNER_MODEL = "gpt-4o-mini"
     # ANALYST_MODEL = "gpt-4o-mini"
