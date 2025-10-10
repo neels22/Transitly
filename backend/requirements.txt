@@ -50,7 +50,7 @@ langsmith==0.4.32
 marshmallow==3.26.1
 multidict==6.6.4
 mypy_extensions==1.1.0
-numpy==2.3.3
+numpy==2.2.6
 openai==2.1.0
 orjson==3.11.3
 ormsgpack==1.10.0
@@ -83,3 +83,12 @@ urllib3==2.5.0
 xxhash==3.6.0
 yarl==1.20.1
 zstandard==0.25.0
+nova-act==2.1.36.0
+python-dotenv==1.1.1
+playwright==1.55.0
+httpx==0.28.1
+beautifulsoup4==4.13.5
+jsonschema==4.25.1
+boto3==1.40.37
+pandas==2.3.2
+uvicorn==0.37.0
