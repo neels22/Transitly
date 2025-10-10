@@ -150,22 +150,44 @@ class AmazonAddressChangeAgent:
             return {}
 
         uid = state.get("user_id")
+        user_details = state.get("user_details", {}) or {}
+        
         # Idempotency: if address_change_result already success & same address → no-op
         prev = state.get("address_change_result", {}) or {}
-        if prev.get("success") and state.get("user_details", {}).get("address") == new_address:
+        if prev.get("success") and user_details.get("address") == new_address:
             msg = "[amazon_address_change] No-op; already set to desired address."
             out: AgentState = {"messages": [AIMessage(content=msg)]}
             out.update(_update_checklist_status_delta(state, "done", "No-op"))
             return out
 
-        # Call the tool safely
+        # Parse the address string into components
+        # Expected format: "street, city, state zip" or similar
+        address_parts = self._parse_address(new_address)
+        
+        # Get user info for the tool
+        full_name = user_details.get("name", "User")
+        # Default phone - you might want to add this to user_details
+        phone = user_details.get("phone", "+10000000000")
+        
+        # Call the tool safely with detailed parameters
         try:
-            result = update_amazon_address.invoke({"new_address": new_address, "user_id": uid})
+            result = update_amazon_address.invoke({
+                "full_name": full_name,
+                "street": address_parts.get("street", ""),
+                "city": address_parts.get("city", ""),
+                "state": address_parts.get("state", ""),
+                "zip_code": address_parts.get("zip", ""),
+                "phone": phone,
+                "country": address_parts.get("country", "United States"),
+                "unit": address_parts.get("unit", ""),
+                "make_default": True,
+                "user_id": uid
+            })
         except Exception as e:
             result = {"success": False, "error": f"{type(e).__name__}: {e}"}
 
         # Update state projections
-        ud = dict(state.get("user_details", {}) or {})
+        ud = dict(user_details)
         if result.get("success"):
             ud["address"] = result.get("address", new_address)
 
@@ -190,6 +212,71 @@ class AmazonAddressChangeAgent:
             out.update(_update_checklist_status_delta(state, "failed", str(result.get("error")) or "Tool failed"))
 
         return out
+
+    def _parse_address(self, address_str: str) -> Dict[str, str]:
+        """
+        Parse an address string into components.
+        Expected format: "street, city, state zip" or "street, city, state"
+        This is a simple parser - you may want to use a library like usaddress for production.
+        """
+        import re
+        
+        parts = {}
+        
+        # Try to parse: "123 Main St, City, State ZIP"
+        # or "123 Main St Apt 2, City, State ZIP"
+        address_str = address_str.strip()
+        
+        # Split by comma
+        segments = [s.strip() for s in address_str.split(",")]
+        
+        if len(segments) >= 3:
+            # segments[0] = street (possibly with unit)
+            parts["street"] = segments[0]
+            parts["city"] = segments[1]
+            
+            # segments[2] should be "State ZIP" or just "State"
+            state_zip = segments[2].strip()
+            
+            # Try to extract state and zip
+            match = re.search(r'([A-Z]{2})\s*(\d{5}(?:-\d{4})?)?', state_zip)
+            if match:
+                parts["state"] = match.group(1)
+                parts["zip"] = match.group(2) or ""
+            else:
+                # Try state name
+                state_parts = state_zip.split()
+                if state_parts:
+                    parts["state"] = state_parts[0][:2].upper()  # Take first 2 chars
+                    if len(state_parts) > 1 and state_parts[-1].isdigit():
+                        parts["zip"] = state_parts[-1]
+        elif len(segments) == 2:
+            # "street, city state zip"
+            parts["street"] = segments[0]
+            city_state_zip = segments[1].strip()
+            
+            # Try to extract city, state, zip
+            match = re.search(r'(.+?)\s+([A-Z]{2})\s*(\d{5}(?:-\d{4})?)?', city_state_zip)
+            if match:
+                parts["city"] = match.group(1).strip()
+                parts["state"] = match.group(2)
+                parts["zip"] = match.group(3) or ""
+        else:
+            # Fallback: just use the whole string as street
+            parts["street"] = address_str
+            parts["city"] = ""
+            parts["state"] = ""
+            parts["zip"] = ""
+        
+        # Set defaults for missing parts
+        parts.setdefault("street", "")
+        parts.setdefault("city", "")
+        parts.setdefault("state", "")
+        parts.setdefault("zip", "")
+        parts.setdefault("unit", "")
+        parts.setdefault("country", "United States")
+        
+        return parts
 
     def _should_continue(self, state: AgentState) -> str:
         # If we have a proceed=true decision, go call the tool; else end.
