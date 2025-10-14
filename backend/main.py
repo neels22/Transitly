@@ -13,6 +13,8 @@ from botocore.exceptions import ClientError
 from jose import JWTError, jwt
 from jose.exceptions import JWKError
 import base64
+from datetime import date
+from pydantic import BaseModel
 
 app = FastAPI(title="Transitly Backend (dev with Docker)")
 
@@ -32,6 +34,7 @@ CLIENT_SECRET = os.environ.get("CLIENT_SECRET")  # Add this to .env if using con
 REDIRECT_URI = os.environ.get("REDIRECT_URI", "http://localhost:8000/auth/callback")
 AWS_REGION = os.environ.get("AWS_REGION", "us-west-2")
 DDB_TABLE = os.environ.get("DDB_TABLE", "TransitlyUsers")
+DDB_MOVES_TABLE = os.environ.get("DDB_MOVES_TABLE", "TransitlyMoves")
 DYNAMODB_ENDPOINT = os.environ.get("DYNAMODB_ENDPOINT")
 USER_POOL_ID = os.environ.get("USER_POOL_ID")  # Add this to .env
 
@@ -41,6 +44,7 @@ if DYNAMODB_ENDPOINT:
     boto_kwargs["endpoint_url"] = DYNAMODB_ENDPOINT
 dynamodb = boto3.resource("dynamodb", **boto_kwargs)
 users_table = dynamodb.Table(DDB_TABLE)
+moves_table = dynamodb.Table(DDB_MOVES_TABLE)
 
 # === Setup Cognito client ===
 cognito_client = boto3.client("cognito-idp", region_name=AWS_REGION)
@@ -127,6 +131,13 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
     
     payload = verify_jwt_token(credentials.credentials)
     return payload
+
+# --- MOVE DATA MODEL ---
+class MoveDetails(BaseModel):
+    from_address: str
+    to_address: str
+    move_out_date:date
+    move_in_date: date
 
 # === Routes ===
 @app.get("/")
@@ -508,3 +519,27 @@ def confirm_forgot_password(
 def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "service": "transitly-backend"}
+
+# --- MOVE ---
+@app.post("/move")
+def submit_move_details(data: MoveDetails, current_user: dict = Depends(get_current_user)): 
+    user_id = current_user.get("sub")
+
+    move_item = {
+        "userId" : user_id,
+        "moveId" : f"{user_id}#{data.move_out_date}",
+        "fromAddress" : data.from_address,
+        "toAddress" : data.to_address,
+        "moveOutDate" : data.move_out_date.isoformat(),
+        "moveInDate" : data.move_in_date.isoformat(),
+        "createdAt" : date.today().isoformat()
+    }
+
+    try:
+        moves_table.put_item(Item=move_item)
+        return {
+            "message": "Move details saved successfully.",
+            "data": move_item
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save move: {str(e)}")

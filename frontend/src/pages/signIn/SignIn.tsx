@@ -21,10 +21,8 @@ export default function SignIn() {
   const location = useLocation();
 
   useEffect(() => {
-    // Check for success message from confirmation page
     if (location.state?.message) {
       setNotification({ show: true, message: location.state.message, type: 'success' });
-      // Clear the location state
       navigate(location.pathname, { replace: true, state: {} });
     }
   }, [location.state, navigate, location.pathname]);
@@ -44,12 +42,11 @@ export default function SignIn() {
         email,
         password,
       });
-      
-      // Set user and tokens in context
+
       setUser(response.user);
       setTokens(response.tokens);
+      localStorage.setItem("id_token", response.tokens.id_token);
       
-      // Navigate to home page
       navigate('/');
     } catch (err) {
       if (err instanceof ApiError) {
@@ -69,11 +66,6 @@ export default function SignIn() {
   const handleSignUp = () => {
     navigate('/sign-up');
   };
-
-  /*const handleForgotPassword = () => {
-    // TODO: Implement forgot password flow
-    setError('Forgot password feature coming soon!');
-  };*/
 
   return (
     <div>
@@ -125,13 +117,6 @@ export default function SignIn() {
                 onClick={handleSignUp}
               />
             </div>
-            {/*<div className="w-full">
-              <Button
-                text="Forgot Password?"
-                size={"lg"}
-                onClick={handleForgotPassword}
-              />
-            </div>*/}
           </div>
         </div>
       </Modal>

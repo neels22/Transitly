@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import Button from "../button";
+import hamburgerIcon from "../../../assets/hamburger.svg"; 
 
 export default function Header() {
   const navigate = useNavigate();
@@ -8,8 +8,8 @@ export default function Header() {
     navigate('/');
   };
 
-  const handleSignInClick = () => {
-    navigate('/sign-in');
+  const handleMenuClick = () => {
+    console.log("Menu clicked");
   };
 
   return (
@@ -23,7 +23,16 @@ export default function Header() {
         />
       </div>
       <div className="flex items-center space-x-4">
-        <Button text="Sign In" rounded={true} onClick={handleSignInClick} />
+        <button
+          onClick={handleMenuClick}
+          className="focus:outline-none"
+        >
+          <img
+            src={hamburgerIcon}
+            alt="Menu"
+            className="h-7 w-7"
+          />
+        </button>
       </div>
     </header>
   );
