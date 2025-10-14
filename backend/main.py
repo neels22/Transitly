@@ -543,3 +543,4 @@ def submit_move_details(data: MoveDetails, current_user: dict = Depends(get_curr
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save move: {str(e)}")
+    return {"status": "healthy", "service": "transitly-backend"}
