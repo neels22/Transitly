@@ -57,8 +57,8 @@ export default function Home() {
 };
 
 // Helper function to parse date string in local timezone
-const parseLocalDate = (dateString: string): Date | null => {
-  if (!dateString) return null;
+const parseLocalDate = (dateString: string): Date | undefined => {
+  if (!dateString) return undefined;
   const [year, month, day] = dateString.split('-').map(Number);
   return new Date(year, month - 1, day); // month is 0-indexed
 };
