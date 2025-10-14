@@ -42,19 +42,26 @@ export default function Home() {
   };
 
   const handleDateChange = (date: Date | null, fieldName: string) => {
-    if (!date) {
-      setForm((prev) => ({ ...prev, [fieldName]: "" }));
-      return;
-    }
-    
-    // Format date as YYYY-MM-DD in local timezone
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const value = `${year}-${month}-${day}`;
-    
-    setForm((prev) => ({ ...prev, [fieldName]: value }));
-  };
+  if (!date) {
+    setForm((prev) => ({ ...prev, [fieldName]: "" }));
+    return;
+  }
+  
+  // Format date as YYYY-MM-DD in local timezone
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const value = `${year}-${month}-${day}`;
+  
+  setForm((prev) => ({ ...prev, [fieldName]: value }));
+};
+
+// Helper function to parse date string in local timezone
+const parseLocalDate = (dateString: string): Date | null => {
+  if (!dateString) return null;
+  const [year, month, day] = dateString.split('-').map(Number);
+  return new Date(year, month - 1, day); // month is 0-indexed
+};
 
   const handleSubmit = async () => {
     const { from_address, to_address, move_out_date, move_in_date } = form;
@@ -127,7 +134,7 @@ export default function Home() {
         <Field icon={calendarIcon}>
           <div className="w-full min-w-[160px]">
             <DatePicker
-              selected={form.move_out_date ? new Date(form.move_out_date) : null}
+              selected={parseLocalDate(form.move_out_date)}
               onChange={(date) => handleDateChange(date, "move_out_date")}
               placeholderText="Move Out Date"
               dateFormat="MM/dd/yyyy"
@@ -135,7 +142,7 @@ export default function Home() {
               showYearDropdown
               dropdownMode="select"
               isClearable
-              maxDate={form.move_in_date ? new Date(form.move_in_date) : undefined}
+              maxDate={parseLocalDate(form.move_in_date)}
               className="text-gray-700 bg-white rounded-full transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-[#FF4124] hover:border-[#FF4124] placeholder:text-gray-400 text-sm px-4 py-2 w-full"
             />
           </div>
@@ -161,7 +168,7 @@ export default function Home() {
         <Field icon={calendarIcon}>
           <div className="w-full min-w-[160px]">
             <DatePicker
-              selected={form.move_in_date ? new Date(form.move_in_date) : null}
+              selected={parseLocalDate(form.move_in_date)}
               onChange={(date) => handleDateChange(date, "move_in_date")}
               placeholderText="Move In Date"
               dateFormat="MM/dd/yyyy"
@@ -169,7 +176,7 @@ export default function Home() {
               showYearDropdown
               dropdownMode="select"
               isClearable
-              minDate={form.move_out_date ? new Date(form.move_out_date) : undefined}
+              minDate={parseLocalDate(form.move_out_date)}
               className="text-gray-700 bg-white rounded-full transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-[#FF4124] hover:border-[#FF4124] placeholder:text-gray-400 text-sm px-4 py-2 w-full"
             />
           </div>
