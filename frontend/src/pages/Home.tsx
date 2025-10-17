@@ -15,7 +15,7 @@ const Field = ({
   icon: string;
   children: React.ReactNode;
 }) => (
-  <div className="flex items-center gap-2 px-3 z-10">
+  <div className="flex items-center gap-2 px-3">
     <img src={icon} alt="" className="w-4 h-4 opacity-80" />
     {children}
   </div>
@@ -42,26 +42,24 @@ export default function Home() {
   };
 
   const handleDateChange = (date: Date | null, fieldName: string) => {
-  if (!date) {
-    setForm((prev) => ({ ...prev, [fieldName]: "" }));
-    return;
-  }
-  
-  // Format date as YYYY-MM-DD in local timezone
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const value = `${year}-${month}-${day}`;
-  
-  setForm((prev) => ({ ...prev, [fieldName]: value }));
-};
+    if (!date) {
+      setForm((prev) => ({ ...prev, [fieldName]: "" }));
+      return;
+    }
 
-// Helper function to parse date string in local timezone
-const parseLocalDate = (dateString: string): Date | undefined => {
-  if (!dateString) return undefined;
-  const [year, month, day] = dateString.split('-').map(Number);
-  return new Date(year, month - 1, day); // month is 0-indexed
-};
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const value = `${year}-${month}-${day}`;
+
+    setForm((prev) => ({ ...prev, [fieldName]: value }));
+  };
+
+  const parseLocalDate = (dateString: string): Date | undefined => {
+    if (!dateString) return undefined;
+    const [year, month, day] = dateString.split("-").map(Number);
+    return new Date(year, month - 1, day);
+  };
 
   const handleSubmit = async () => {
     const { from_address, to_address, move_out_date, move_in_date } = form;
@@ -114,85 +112,90 @@ const parseLocalDate = (dateString: string): Date | undefined => {
   };
 
   return (
-    <div className="min-h-screen bg-white flex justify-center items-start pt-16 px-6 text-sm">
-      <div className="flex flex-wrap md:flex-nowrap items-center justify-center bg-white border border-gray-200 px-6 py-3 rounded-full shadow-md w-full max-w-5xl gap-3">
-        <Field icon={locationIcon}>
-          <AddressAutocomplete
-            name="from_address"
-            placeholder="From Address"
-            value={form.from_address}
-            onChange={handleChange}
-            onAddressSelect={(address) =>
-              setForm((prev) => ({ ...prev, from_address: address }))
-            }
-            border={false}
-          />
-        </Field>
-
-        <div className="w-px h-10 bg-gray-300" />
-
-        <Field icon={calendarIcon}>
-          <div className="w-full min-w-[160px]">
-            <DatePicker
-              selected={parseLocalDate(form.move_out_date)}
-              onChange={(date) => handleDateChange(date, "move_out_date")}
-              placeholderText="Move Out Date"
-              dateFormat="MM/dd/yyyy"
-              showMonthDropdown
-              showYearDropdown
-              dropdownMode="select"
-              isClearable
-              maxDate={parseLocalDate(form.move_in_date)}
-              className="text-gray-700 bg-white rounded-full transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-[#FF4124] hover:border-[#FF4124] placeholder:text-gray-400 text-sm px-4 py-2 w-full"
+    <div className="min-h-screen bg-white text-sm flex flex-col items-center">
+      {/* 🟧 Orange section (background only) */}
+      <div className="bg-[#FF4124] h-[250px] flex justify-center items-end absolute top-15 left-0 right-0">
+        {/* Floating bar overlaps bottom of orange */}
+        <div className="bg-white shadow-md rounded-full border border-gray-200 px-6 py-3 flex flex-wrap md:flex-nowrap items-center justify-center gap-3 max-w-5xl w-full -mb-8.5 z-10">
+          <Field icon={locationIcon}>
+            <AddressAutocomplete
+              name="from_address"
+              placeholder="From Address"
+              value={form.from_address}
+              onChange={handleChange}
+              onAddressSelect={(address) =>
+                setForm((prev) => ({ ...prev, from_address: address }))
+              }
+              border={false}
             />
-          </div>
-        </Field>
+          </Field>
 
-        <div className="w-px h-10 bg-gray-300" />
+          <div className="w-px h-10 bg-gray-300" />
 
-        <Field icon={locationIcon}>
-          <AddressAutocomplete
-            name="to_address"
-            placeholder="To Address"
-            value={form.to_address}
-            onChange={handleChange}
-            onAddressSelect={(address) =>
-              setForm((prev) => ({ ...prev, to_address: address }))
-            }
-            border={false}
-          />
-        </Field>
+          <Field icon={calendarIcon}>
+            <div className="w-full min-w-[160px]">
+              <DatePicker
+                selected={parseLocalDate(form.move_out_date)}
+                onChange={(date) => handleDateChange(date, "move_out_date")}
+                placeholderText="Move Out Date"
+                dateFormat="MM/dd/yyyy"
+                showMonthDropdown
+                showYearDropdown
+                dropdownMode="select"
+                isClearable
+                maxDate={parseLocalDate(form.move_in_date)}
+                className="text-gray-700 bg-white rounded-full transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-[#FF4124] hover:border-[#FF4124] placeholder:text-gray-400 text-sm px-4 py-2 w-full"
+              />
+            </div>
+          </Field>
 
-        <div className="w-px h-10 bg-gray-300" />
+          <div className="w-px h-10 bg-gray-300" />
 
-        <Field icon={calendarIcon}>
-          <div className="w-full min-w-[160px]">
-            <DatePicker
-              selected={parseLocalDate(form.move_in_date)}
-              onChange={(date) => handleDateChange(date, "move_in_date")}
-              placeholderText="Move In Date"
-              dateFormat="MM/dd/yyyy"
-              showMonthDropdown
-              showYearDropdown
-              dropdownMode="select"
-              isClearable
-              minDate={parseLocalDate(form.move_out_date)}
-              className="text-gray-700 bg-white rounded-full transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-[#FF4124] hover:border-[#FF4124] placeholder:text-gray-400 text-sm px-4 py-2 w-full"
+          <Field icon={locationIcon}>
+            <AddressAutocomplete
+              name="to_address"
+              placeholder="To Address"
+              value={form.to_address}
+              onChange={handleChange}
+              onAddressSelect={(address) =>
+                setForm((prev) => ({ ...prev, to_address: address }))
+              }
+              border={false}
             />
-          </div>
-        </Field>
+          </Field>
 
-        <div className="pl-2">
-          <button
-            onClick={handleSubmit}
-            disabled={isLoading}
-            className="flex items-center justify-center bg-[#FF4124] rounded-full w-10 h-10 hover:scale-105 transition focus:outline-none border-none"
-          >
-            <img src={goButton} alt="Submit" className="w-5 h-5" />
-          </button>
+          <div className="w-px h-10 bg-gray-300" />
+
+          <Field icon={calendarIcon}>
+            <div className="w-full min-w-[160px]">
+              <DatePicker
+                selected={parseLocalDate(form.move_in_date)}
+                onChange={(date) => handleDateChange(date, "move_in_date")}
+                placeholderText="Move In Date"
+                dateFormat="MM/dd/yyyy"
+                showMonthDropdown
+                showYearDropdown
+                dropdownMode="select"
+                isClearable
+                minDate={parseLocalDate(form.move_out_date)}
+                className="text-gray-700 bg-white rounded-full transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-[#FF4124] hover:border-[#FF4124] placeholder:text-gray-400 text-sm px-4 py-2 w-full"
+              />
+            </div>
+          </Field>
+
+          <div className="pl-2">
+            <button
+              onClick={handleSubmit}
+              disabled={isLoading}
+              className="flex items-center justify-center bg-[#FF4124] rounded-full w-10 h-10 hover:bg-[#000] hover:scale-105 transition focus:outline-none border-none"
+            >
+              <img src={goButton} alt="Submit" className="w-5 h-5" />
+            </button>
+          </div>
         </div>
       </div>
 
+      {/* Notification below */}
       <Notification
         message={notification.message}
         type={notification.type}
