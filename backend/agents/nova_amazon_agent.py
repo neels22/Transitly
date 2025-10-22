@@ -51,8 +51,9 @@ def update_amazon_address(
     try:
         with NovaAct(
             starting_page="https://www.amazon.com",
-            user_data_dir=user_data_dir,
+            # user_data_dir=user_data_dir, 
             clone_user_data_dir=False,
+            headless=False,
         ) as nova:
             if require_login:
                 input("Log in to Amazon in the opened browser, then press Enter to continue...")
