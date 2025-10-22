@@ -50,10 +50,14 @@ export default function AgentStatus({ userId, onClose }: AgentModalProps) {
       setIsRunning(false);
       return;
     }
-
+  
     const apiUrl = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
     const url = `${apiUrl}/run-agents-stream`;
-
+  
+    // Add abort controller to cancel the connection
+    const abortController = new AbortController();
+    let isActive = true;
+  
     const connectSSE = async () => {
       try {
         const response = await fetch(url, {
@@ -62,31 +66,39 @@ export default function AgentStatus({ userId, onClose }: AgentModalProps) {
             Authorization: `Bearer ${token}`,
             Accept: "text/event-stream",
           },
+          signal: abortController.signal, // Add abort signal
         });
-
+  
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
-
+  
         const reader = response.body?.getReader();
         const decoder = new TextDecoder();
-
+  
         if (!reader) {
           throw new Error("Failed to get response reader");
         }
-
+  
         while (true) {
+          if (!isActive) { // Check if we should stop
+            reader.cancel();
+            break;
+          }
+  
           const { done, value } = await reader.read();
           if (done) break;
-
+  
           const chunk = decoder.decode(value);
           const lines = chunk.split("\n");
-
+  
           for (const line of lines) {
             if (line.startsWith("data: ")) {
               try {
                 const data = JSON.parse(line.slice(6));
-                handleSSEMessage(data);
+                if (isActive) { // Only process if still active
+                  handleSSEMessage(data);
+                }
               } catch (e) {
                 console.error("Failed to parse SSE data:", e);
               }
@@ -94,15 +106,30 @@ export default function AgentStatus({ userId, onClose }: AgentModalProps) {
           }
         }
       } catch (error) {
-        console.error("SSE Connection error:", error);
-        addAIMessage("Connection error. Please try again.");
-        setIsRunning(false);
+        // Ignore abort errors (they're expected on cleanup)
+        if (error instanceof Error && error.name === 'AbortError') {
+          console.log("SSE connection aborted (expected on cleanup)");
+          return;
+        }
+        
+        if (isActive) { // Only show error if not intentionally aborted
+          console.error("SSE Connection error:", error);
+          addAIMessage("Connection error. Please try again.");
+          setIsRunning(false);
+        }
       }
     };
-
+  
     connectSSE();
+  
+    // Cleanup function - runs when component unmounts or dependencies change
+    return () => {
+      isActive = false;
+      abortController.abort();
+      console.log("SSE cleanup: connection aborted");
+    };
   }, [userId]);
-
+  
   const handleSSEMessage = (data: any) => {
     switch (data.type) {
       case "connected":
