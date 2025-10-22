@@ -7,6 +7,7 @@ import { ApiError } from "../services/move";
 import goButton from "../../assets/go-button.svg";
 import locationIcon from "../../assets/location.svg";
 import calendarIcon from "../../assets/calendar.svg";
+import artwork from "../../assets/artwork.png";
 import AddressAutocomplete from "../components/address/AddressAutoComplete";
 import { ChecklistCard } from "../components/chatcard";
 
@@ -39,6 +40,7 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [showAgentModal, setShowAgentModal] = useState(false);
   const [userId, setUserId] = useState<string>("");
+  const [isSignedIn, setIsSignedIn] = useState(false);
   const [checklistCards, setChecklistCards] = useState<any[]>([]);
 
   // Extract userId from token on mount
@@ -48,14 +50,20 @@ export default function Home() {
       try {
         const payload = JSON.parse(atob(token.split(".")[1]));
         setUserId(payload.sub || "");
+        setIsSignedIn(true);
       } catch (e) {
         console.error("Failed to decode token:", e);
+        setIsSignedIn(false);
       }
+    } else {
+      setIsSignedIn(false);
     }
   }, []);
 
-  // Fetch checklists on page load
+  // Fetch checklists on page load (only if signed in)
   useEffect(() => {
+    if (!isSignedIn) return;
+
     const fetchChecklists = async () => {
       try {
         const res = await fetch(
@@ -70,7 +78,7 @@ export default function Home() {
     };
 
     fetchChecklists();
-  }, []);
+  }, [isSignedIn]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -242,19 +250,33 @@ export default function Home() {
         <AgentModal userId={userId} onClose={() => setShowAgentModal(false)} />
       )}
 
-      {/* 🔽 Checklist Cards */}
-      {checklistCards.length > 0 && (
-        <div className="w-full max-w-7xl px-6 py-10 mt-[320px] mb-12">
-          <h2 className="text-lg font-semibold mb-15 pl-2 text-left">
-            Previous Chats:
-          </h2>
-          <div className="flex flex-wrap gap-20 justify-center">
-            {checklistCards.map((card) => (
-              <ChecklistCard key={card.checklistId} {...card} />
-            ))}
+      {/* 🔽 Content Section - Artwork OR Checklist Cards */}
+      <div className="w-full max-w-7xl px-6 py-10 mt-[320px] mb-12">
+        {!isSignedIn ? (
+          // Show artwork when not signed in
+          <div className="flex justify-center items-center">
+            <img
+              src={artwork}
+              alt="Transitly Artwork"
+              className="max-w-full h-auto rounded-2xl shadow-lg"
+            />
           </div>
-        </div>
-      )}
+        ) : (
+          // Show checklist cards when signed in
+          checklistCards.length > 0 && (
+            <>
+              <h2 className="text-lg font-semibold mb-15 pl-2 text-left">
+                Previous Chats:
+              </h2>
+              <div className="flex flex-wrap gap-20 justify-center">
+                {checklistCards.map((card) => (
+                  <ChecklistCard key={card.checklistId} {...card} />
+                ))}
+              </div>
+            </>
+          )
+        )}
+      </div>
     </div>
   );
 }
