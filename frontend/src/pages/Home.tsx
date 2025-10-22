@@ -258,7 +258,7 @@ export default function Home() {
             <img
               src={artwork}
               alt="Transitly Artwork"
-              className="max-w-full h-auto rounded-2xl shadow-lg"
+              className="max-w-4xl w-full h-auto max-h-[60vh] object-contain"
             />
           </div>
         ) : (
