@@ -8,6 +8,7 @@ import goButton from "../../assets/go-button.svg";
 import locationIcon from "../../assets/location.svg";
 import calendarIcon from "../../assets/calendar.svg";
 import AddressAutocomplete from "../components/address/AddressAutoComplete";
+import { ChecklistCard } from "../components/chatcard";
 
 const Field = ({
   icon,
@@ -38,6 +39,7 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [showAgentModal, setShowAgentModal] = useState(false);
   const [userId, setUserId] = useState<string>("");
+  const [checklistCards, setChecklistCards] = useState<any[]>([]);
 
   // Extract userId from token on mount
   useEffect(() => {
@@ -50,6 +52,24 @@ export default function Home() {
         console.error("Failed to decode token:", e);
       }
     }
+  }, []);
+
+  // Fetch checklists on page load
+  useEffect(() => {
+    const fetchChecklists = async () => {
+      try {
+        const res = await fetch(
+          `${import.meta.env.VITE_API_BASE_URL}/checklists`
+        );
+        if (!res.ok) throw new Error("Failed to fetch checklists");
+        const data = await res.json();
+        setChecklistCards(data.checklists || []);
+      } catch (err) {
+        console.error("Error loading checklists:", err);
+      }
+    };
+
+    fetchChecklists();
   }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -220,6 +240,20 @@ export default function Home() {
       {/* Agent Modal */}
       {showAgentModal && (
         <AgentModal userId={userId} onClose={() => setShowAgentModal(false)} />
+      )}
+
+      {/* 🔽 Checklist Cards */}
+      {checklistCards.length > 0 && (
+        <div className="w-full max-w-7xl px-6 py-10 mt-[320px] mb-12">
+          <h2 className="text-lg font-semibold mb-15 pl-2 text-left">
+            Previous Chats:
+          </h2>
+          <div className="flex flex-wrap gap-20 justify-center">
+            {checklistCards.map((card) => (
+              <ChecklistCard key={card.checklistId} {...card} />
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );

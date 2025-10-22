@@ -187,7 +187,7 @@ export default function AgentStatus({ userId, onClose }: AgentModalProps) {
     );
   };
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!inputMessage.trim()) return;
 
     const newMessage: Message = {
@@ -200,17 +200,52 @@ export default function AgentStatus({ userId, onClose }: AgentModalProps) {
     setMessages((prev) => [...prev, newMessage]);
     setInputMessage("");
 
-    // TODO: Send to backend API for chat functionality
-    setTimeout(() => {
+    try {
+      const token = localStorage.getItem("id_token");
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/chat`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            message: inputMessage,
+            checklist_context: checklist.map((item) => ({
+              title: item.title,
+              status: item.status,
+              agent_label: item.agent_label,
+            })),
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to send message");
+      }
+
+      const data = await response.json();
+
       const aiResponse: Message = {
         id: (Date.now() + 1).toString(),
-        content:
-          "I'm currently focused on running your automation tasks. Chat functionality coming soon!",
+        content: data.message,
         sender: "ai",
         timestamp: new Date(),
       };
+
       setMessages((prev) => [...prev, aiResponse]);
-    }, 1000);
+    } catch (error) {
+      console.error("Chat error:", error);
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        content:
+          "Sorry, I'm having trouble responding right now. Please try again.",
+        sender: "ai",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    }
   };
 
   const getStrikethroughStyle = (status: ChecklistItem["status"]) => {

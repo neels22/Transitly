@@ -19,7 +19,7 @@ import re
 from dotenv import load_dotenv
 from agents.orchestrator_agent import run_orchestrator_agent
 from agents.agent_state import ChecklistItem
-from typing import List
+from typing import Optional, List
 from fastapi.responses import StreamingResponse
 import asyncio
 
@@ -627,22 +627,15 @@ async def run_agents_stream(current_user: dict = Depends(get_current_user)):
                 "reason": ""
             }
             
-            # 4. Emit progress for each expected agent
-            # TODO: Later we'll make orchestrator stream these in real-time
-            agents_sequence = [
-                {"label": "get_user_detail", "name": "Fetching user details"},
-                {"label": "gen_checklist", "name": "Generating checklist"},
-                {"label": "amazon_address_change", "name": "Updating Amazon address"}
-            ]
+            # 4. Run orchestrator synchronously (will block, but that's the reality)
+            # Note: To make this truly streaming, orchestrator needs to be refactored to yield events
+            yield f"data: {json.dumps({'type': 'status', 'message': 'Running agent workflow...'})}\n\n"
             
-            for agent in agents_sequence:
-                yield f"data: {json.dumps({'type': 'agent_start', 'agent': agent['label'], 'name': agent['name']})}\n\n"
-                await asyncio.sleep(0.5)
+            # Run in thread pool to avoid blocking event loop completely
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, run_orchestrator_agent, initial_state)
             
-            # 5. Run orchestrator (blocking for now)
-            result = run_orchestrator_agent(initial_state)
-            
-            # 6. Convert checklist to dict format
+            # 5. Convert checklist to dict format
             checklist_dicts = []
             for item in result.get("checklist", []):
                 if isinstance(item, ChecklistItem):
@@ -661,12 +654,7 @@ async def run_agents_stream(current_user: dict = Depends(get_current_user)):
             yield f"data: {json.dumps({'type': 'checklist', 'data': checklist_dicts})}\n\n"
             await asyncio.sleep(0.5)
             
-            # 7. Send completion events for agents
-            for agent in agents_sequence:
-                yield f"data: {json.dumps({'type': 'agent_complete', 'agent': agent['label'], 'name': agent['name']})}\n\n"
-                await asyncio.sleep(1)
-            
-            # 8. Send final completion
+            # 6. Send final completion
             yield f"data: {json.dumps({'type': 'complete', 'data': {'checklist': checklist_dicts, 'steps': result.get('steps', 0), 'address_change_result': result.get('address_change_result', {})}})}\n\n"
             
         except Exception as e:
@@ -809,3 +797,136 @@ def run_agents(current_user: dict = Depends(get_current_user)):
             detail=f"Agent workflow failed: {str(e)}"
         )
         
+    return {"status": "healthy", "service": "transitly-backend"}
+
+# --- DUMMY CHECKLISTS ENDPOINT ---
+@app.get("/checklists")
+def get_checklists():
+    """Return dummy checklists for now (to be replaced with DynamoDB query later)"""
+    dummy_checklists = [
+        {
+            "checklistId": "cl1",
+            "createdAt": "2025-10-20",
+            "fromAddress": "1234 Lane lane, Drive drive, San Jose, CA 987653",
+            "toAddress": "5678 Driveway driveway, San Mateo, CA 987654",
+            "moveOutDate": "2025-12-12",
+            "moveInDate": "2025-12-12",
+            "checklist": [
+                {"title": "To do A", "status": "agentdone"},
+                {"title": "To do B", "status": "manualdone"},
+                {"title": "To do C", "status": "failed"},
+                {"title": "To do D", "status": "todo"},
+            ],
+        },
+        {
+            "checklistId": "cl2",
+            "createdAt": "2025-10-20",
+            "fromAddress": "1234 Lane lane, Drive drive, San Jose, CA 987653",
+            "toAddress": "5678 Driveway driveway, San Mateo, CA 987654",
+            "moveOutDate": "2025-12-12",
+            "moveInDate": "2025-12-12",
+            "checklist": [
+                {"title": "To do A", "status": "failed"},
+                {"title": "To do B", "status": "todo"},
+                {"title": "To do C", "status": "todo"},
+                {"title": "To do D", "status": "todo"},
+            ],
+        },
+        {
+            "checklistId": "cl3",
+            "createdAt": "2025-10-20",
+            "fromAddress": "1234 Lane lane, Drive drive, San Jose, CA 987653",
+            "toAddress": "5678 Driveway driveway, San Mateo, CA 987654",
+            "moveOutDate": "2025-12-12",
+            "moveInDate": "2025-12-12",
+            "checklist": [
+                {"title": "To do A", "status": "todo"},
+                {"title": "To do B", "status": "todo"}
+            ],
+        },
+    ]
+    return {"checklists": dummy_checklists}
+
+# --- DELETE CHECKLIST ---
+@app.delete("/checklist/{checklist_id}")
+def delete_checklist(checklist_id: str, current_user: dict = Depends(get_current_user)):
+    """
+    Temporarily simulate checklist deletion.
+    Later, integrate with DynamoDB to actually remove by ID.
+    """
+    # Here you’d call DynamoDB to delete item
+    print(f"Deleting checklist {checklist_id} for user {current_user.get('sub')}")
+    return {"message": f"Checklist {checklist_id} deleted successfully."}
+
+# --- CHAT WITH AGENT ---
+class ChatMessage(BaseModel):
+    message: str
+    checklist_context: Optional[List[Dict[str, Any]]] = None
+
+@app.post("/chat")
+async def chat_with_agent(
+    data: ChatMessage,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Chat with AI assistant about move tasks.
+    Can provide checklist context for task-aware responses.
+    """
+    try:
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        from langchain_core.messages import HumanMessage, SystemMessage
+        
+        user_id = current_user.get("sub")
+        user_name = current_user.get("name", "").split()[0]
+        
+        # Get user's move context
+        response = moves_table.query(
+            KeyConditionExpression="userId = :uid",
+            ExpressionAttributeValues={":uid": user_id},
+            ScanIndexForward=False,
+            Limit=1
+        )
+        
+        move_context = ""
+        if response.get("Items"):
+            move = response["Items"][0]
+            move_context = f"""
+User is moving:
+- From: {move.get('fromAddress')}
+- To: {move.get('toAddress')}
+- Move out: {move.get('moveOutDate')}
+- Move in: {move.get('moveInDate')}
+"""
+        
+        checklist_context = ""
+        if data.checklist_context:
+            checklist_context = "\nCurrent checklist:\n" + "\n".join([
+                f"- {item['title']}: {item['status']}" 
+                for item in data.checklist_context
+            ])
+        
+        system_prompt = f"""You are a helpful moving assistant for {user_name}.
+You help with relocation tasks like updating addresses, transferring utilities, etc.
+
+{move_context}
+{checklist_context}
+
+Be concise, helpful, and action-oriented. If the user asks about a task, 
+explain what needs to be done and offer to help automate it if possible."""
+
+        llm = ChatGoogleGenerativeAI(model=Config.CHAT_MODEL)
+        
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=data.message)
+        ]
+        
+        response = llm.invoke(messages)
+        
+        return {
+            "message": response.content,
+            "timestamp": date.today().isoformat()
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
