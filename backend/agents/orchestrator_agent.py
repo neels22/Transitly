@@ -1,5 +1,7 @@
 # supervisor_orchestrator.py  (can replace your current supervisor block)
 
+# supervisor_orchestrator.py  (can replace your current supervisor block)
+
 from typing import Dict, Literal, Optional
 from pydantic.v1 import BaseModel, Field
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -7,11 +9,15 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
-from config import Config
-from agent_state import AgentState, ChecklistItem
-from checklist_agent import ChecklistAgent
-from Amazon_address_change_agent import AmazonAddressChangeAgent
-from get_user_detail_agent import GetUserDetailAgent
+
+# ✅ CHANGE THESE IMPORTS - Add "agents." prefix
+from agents.config import Config
+from agents.agent_state import AgentState, ChecklistItem
+from agents.checklist_agent import ChecklistAgent
+from agents.Amazon_address_change_agent import AmazonAddressChangeAgent
+from agents.get_user_detail_agent import GetUserDetailAgent
+
+# Rest of the file stays exactly the same...
 
 # --- Instantiate your existing agents (unchanged) ---
 checklist_agent = ChecklistAgent()

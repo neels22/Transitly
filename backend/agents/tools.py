@@ -1,34 +1,70 @@
+import boto3
+import os
+from botocore.exceptions import ClientError
 from langchain_core.tools import tool
 from typing import Dict, Any, Optional
-from nova_amazon_agent import update_amazon_address as nova_update_amazon
+from agents.nova_amazon_agent import update_amazon_address as nova_update_amazon  # This file is in backend/, not agents/
 
-# need a tool that will fetch user details from the database
-# for now  create a dummy .sqlite or .db with random user data
-# user data includes name, from address, to address, movin date, move out date
+AWS_REGION = os.environ.get("AWS_REGION", "us-west-2")
+DYNAMODB_ENDPOINT = os.environ.get("DYNAMODB_ENDPOINT")
+DDB_TABLE = os.environ.get("DDB_TABLE", "TransitlyUsers")
+DDB_MOVES_TABLE = os.environ.get("DDB_MOVES_TABLE", "TransitlyMoves")
 
-# then use the tool to fetch the user details
-# the tool should return the user details in a dictionary
-# the tool should be able to handle the user details in a dictionary
-
+boto_kwargs = {"region_name": AWS_REGION}
+if DYNAMODB_ENDPOINT:
+    boto_kwargs["endpoint_url"] = DYNAMODB_ENDPOINT
+dynamodb = boto3.resource("dynamodb", **boto_kwargs)
+users_table = dynamodb.Table(DDB_TABLE)
+moves_table = dynamodb.Table(DDB_MOVES_TABLE)
 
 @tool
 def get_user_details(user_id: str) -> Dict[str, Any]:
     """
-    Fetch user details from the database
+    Fetch user details from DynamoDB (user info + latest move details)
     Args:
         user_id: The ID of the user to fetch details for
     Returns:
-        A dictionary containing the user details
+        A dictionary containing the user details and move information
     """
+    try:
+        # 1. Get user info from TransitlyUsers table
+        user_response = users_table.get_item(Key={"userId": user_id})
+        user_data = user_response.get("Item", {})
+        
+        if not user_data:
+            return {"_error": f"User {user_id} not found"}
+        
+        # 2. Get latest move info from TransitlyMoves table
+        moves_response = moves_table.query(
+            KeyConditionExpression="userId = :uid",
+            ExpressionAttributeValues={":uid": user_id},
+            ScanIndexForward=False,  # Most recent first
+            Limit=1
+        )
+        
+        move_data = {}
+        if moves_response.get("Items"):
+            move = moves_response["Items"][0]
+            move_data = {
+                "from_address": move.get("fromAddress", ""),
+                "to_address": move.get("toAddress", ""),
+                "moving_date": move.get("moveInDate", ""),
+                "moving_out_date": move.get("moveOutDate", "")
+            }
+        
+        # 3. Combine user and move data
+        return {
+            "name": user_data.get("name", ""),
+            "email": user_data.get("email", ""),
+            "phone": user_data.get("phone", ""),
+            **move_data
+        }
+        
+    except ClientError as e:
+        return {"_error": f"Database error: {str(e)}"}
+    except Exception as e:
+        return {"_error": f"Unexpected error: {str(e)}"}
 
-    return {
-        "name": "John Doe",
-        "phone": "+16693607809",
-        "from_address": "123 Main St, Anytown, CA, 90210",
-        "to_address": "456 Oak Ave, San Jose, CA, 95113",
-        "moving_date": "2021-01-01",
-        "moving_out_date": "2021-01-01"
-    }
 
 @tool("update_amazon_address")
 def update_amazon_address(

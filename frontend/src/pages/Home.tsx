@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import DatePicker from "react-datepicker";
 import Input from "../components/input";
 import Notification from "../components/notification";
+import AgentModal from "../components/agents/AgentStatus";
 import { ApiError } from "../services/move";
 import goButton from "../../assets/go-button.svg";
 import locationIcon from "../../assets/location.svg";
@@ -35,6 +36,21 @@ export default function Home() {
     type: "success" as "success" | "error",
   });
   const [isLoading, setIsLoading] = useState(false);
+  const [showAgentModal, setShowAgentModal] = useState(false);
+  const [userId, setUserId] = useState<string>("");
+
+  // Extract userId from token on mount
+  useEffect(() => {
+    const token = localStorage.getItem("id_token");
+    if (token) {
+      try {
+        const payload = JSON.parse(atob(token.split(".")[1]));
+        setUserId(payload.sub || "");
+      } catch (e) {
+        console.error("Failed to decode token:", e);
+      }
+    }
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -97,11 +113,9 @@ export default function Home() {
         throw new ApiError(errBody.detail || "Failed to submit move.");
       }
       const result = await res.json();
-      setNotification({
-        show: true,
-        message: result.message || "Move submitted successfully!",
-        type: "success",
-      });
+
+      // Open agent modal on successful submission
+      setShowAgentModal(true);
     } catch (err) {
       const message =
         err instanceof ApiError ? err.message : "Failed to submit move.";
@@ -200,10 +214,13 @@ export default function Home() {
         message={notification.message}
         type={notification.type}
         isVisible={notification.show}
-        onClose={() =>
-          setNotification((prev) => ({ ...prev, show: false }))
-        }
+        onClose={() => setNotification((prev) => ({ ...prev, show: false }))}
       />
+
+      {/* Agent Modal */}
+      {showAgentModal && (
+        <AgentModal userId={userId} onClose={() => setShowAgentModal(false)} />
+      )}
     </div>
   );
 }

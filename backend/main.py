@@ -15,6 +15,15 @@ from jose.exceptions import JWKError
 import base64
 from datetime import date
 from pydantic import BaseModel
+import re
+from dotenv import load_dotenv
+from agents.orchestrator_agent import run_orchestrator_agent
+from agents.agent_state import ChecklistItem
+from typing import List
+from fastapi.responses import StreamingResponse
+import asyncio
+
+load_dotenv()
 
 app = FastAPI(title="Transitly Backend (dev with Docker)")
 
@@ -54,6 +63,29 @@ security = HTTPBearer()
 
 # JWKS cache
 _jwks_cache: Optional[Dict] = None
+
+def format_phone_to_e164(phone: str) -> str:
+    """
+    Format phone number to E.164 format (+1XXXXXXXXXX)
+    Strips all non-digit characters and prepends +1 for US numbers
+    """
+    # Remove all non-digit characters
+    digits_only = re.sub(r'\D', '', phone)
+    
+    # Check if it's already prefixed with country code
+    if digits_only.startswith('1') and len(digits_only) == 11:
+        return f"+{digits_only}"
+    elif len(digits_only) == 10:
+        return f"+1{digits_only}"
+    else:
+        raise ValueError(f"Invalid phone number format. Expected 10 digits, got {len(digits_only)}")
+
+def validate_phone_e164(phone: str) -> bool:
+    """
+    Validate that phone is in correct E.164 format for US numbers
+    Format: +1XXXXXXXXXX (exactly 12 characters)
+    """
+    return bool(re.match(r'^\+1\d{10}$', phone))
 
 def calculate_secret_hash(username: str) -> Optional[str]:
     """Calculate SECRET_HASH for Cognito operations"""
@@ -146,14 +178,30 @@ def root():
 
 # --- SIGNUP ---
 @app.post("/signup")
-def signup(email: str = Form(...), password: str = Form(...), first_name: str = Form(...), last_name: str = Form(...), username: str = Form(...)):
+def signup(
+    email: str = Form(...), 
+    password: str = Form(...), 
+    first_name: str = Form(...), 
+    last_name: str = Form(...), 
+    username: str = Form(...),
+    phone: str = Form(...)
+):
     """Sign up a new user with AWS Cognito"""
     try:
+        # Format and validate phone number
+        try:
+            formatted_phone = format_phone_to_e164(phone)
+            if not validate_phone_e164(formatted_phone):
+                raise ValueError("Invalid phone format after formatting")
+        except ValueError as ve:
+            raise HTTPException(status_code=400, detail=f"Invalid phone number: {str(ve)}")
+        
         user_attributes = [
             {"Name": "email", "Value": email},
             {"Name": "given_name", "Value": first_name},
             {"Name": "family_name", "Value": last_name},
-            {"Name": "name", "Value": f"{first_name} {last_name}"}  # This is the formatted name
+            {"Name": "name", "Value": f"{first_name} {last_name}"},
+            {"Name": "phone_number", "Value": formatted_phone}  # Add phone in E.164 format
         ]
         
         signup_params = {
@@ -269,11 +317,12 @@ def signin(email: str = Form(...), password: str = Form(...)):
         # Decode ID token to get user info
         id_payload = verify_jwt_token(tokens["IdToken"])
         
-        # Store/update user in DynamoDB
+        # Store/update user in DynamoDB (include phone)
         user_item = {
             "userId": id_payload.get("sub"),
             "email": id_payload.get("email"),
             "name": id_payload.get("name", ""),
+            "phone": id_payload.get("phone_number", ""),  # Add phone from JWT
             "email_verified": id_payload.get("email_verified", False)
         }
         users_table.put_item(Item=user_item)
@@ -398,11 +447,12 @@ def auth_callback(code: str = None, error: str = None):
         # Verify and decode ID token
         id_payload = verify_jwt_token(tokens["id_token"])
         
-        # Store/update user in DynamoDB
+        # Store/update user in DynamoDB (include phone)
         user_item = {
             "userId": id_payload.get("sub"),
             "email": id_payload.get("email"),
             "name": id_payload.get("name", ""),
+            "phone": id_payload.get("phone_number", ""),  # Add phone from JWT
             "email_verified": id_payload.get("email_verified", False)
         }
         users_table.put_item(Item=user_item)
@@ -435,6 +485,7 @@ def get_current_user_info(current_user: dict = Depends(get_current_user)):
         "user_id": current_user.get("sub"),
         "email": current_user.get("email"),
         "name": current_user.get("name"),
+        "phone": current_user.get("phone_number", ""),  # Add phone
         "email_verified": current_user.get("email_verified", False),
         "token_use": current_user.get("token_use")
     }
@@ -514,6 +565,125 @@ def confirm_forgot_password(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Password reset confirmation failed: {str(e)}")
 
+# --- SSE STREAM FOR AGENTS ---
+@app.get("/run-agents-stream")
+async def run_agents_stream(current_user: dict = Depends(get_current_user)):
+    """
+    Stream agent execution progress via Server-Sent Events (SSE)
+    """
+    async def event_generator():
+        try:
+            user_id = current_user.get("sub")
+            
+            # Send initial connection event
+            yield f"data: {json.dumps({'type': 'connected', 'message': 'Starting agents...'})}\n\n"
+            await asyncio.sleep(0.1)
+            
+            # 1. Fetch user details
+            user_details = {
+                "name": current_user.get("name", ""),
+                "email": current_user.get("email", ""),
+                "phone": current_user.get("phone_number", ""),
+            }
+            
+            # 2. Fetch latest move
+            try:
+                response = moves_table.query(
+                    KeyConditionExpression="userId = :uid",
+                    ExpressionAttributeValues={":uid": user_id},
+                    ScanIndexForward=False,
+                    Limit=1
+                )
+                
+                if not response.get("Items"):
+                    yield f"data: {json.dumps({'type': 'error', 'message': 'No move found. Please submit move details first.'})}\n\n"
+                    return
+                    
+                move = response["Items"][0]
+                user_details.update({
+                    "from_address": move.get("fromAddress", ""),
+                    "to_address": move.get("toAddress", ""),
+                    "moving_date": move.get("moveInDate", ""),
+                    "moving_out_date": move.get("moveOutDate", "")
+                })
+                
+            except ClientError as e:
+                yield f"data: {json.dumps({'type': 'error', 'message': f'Failed to fetch move details: {str(e)}'})}\n\n"
+                return
+            
+            # Send user details loaded event
+            yield f"data: {json.dumps({'type': 'user_details', 'data': user_details})}\n\n"
+            await asyncio.sleep(0.5)
+            
+            # 3. Initialize state
+            initial_state = {
+                "messages": [],
+                "user_id": user_id,
+                "user_details": user_details,
+                "checklist": [],
+                "steps": 0,
+                "done": False,
+                "next_task": "",
+                "reason": ""
+            }
+            
+            # 4. Emit progress for each expected agent
+            # TODO: Later we'll make orchestrator stream these in real-time
+            agents_sequence = [
+                {"label": "get_user_detail", "name": "Fetching user details"},
+                {"label": "gen_checklist", "name": "Generating checklist"},
+                {"label": "amazon_address_change", "name": "Updating Amazon address"}
+            ]
+            
+            for agent in agents_sequence:
+                yield f"data: {json.dumps({'type': 'agent_start', 'agent': agent['label'], 'name': agent['name']})}\n\n"
+                await asyncio.sleep(0.5)
+            
+            # 5. Run orchestrator (blocking for now)
+            result = run_orchestrator_agent(initial_state)
+            
+            # 6. Convert checklist to dict format
+            checklist_dicts = []
+            for item in result.get("checklist", []):
+                if isinstance(item, ChecklistItem):
+                    checklist_dicts.append({
+                        "title": item.title,
+                        "status": item.status,
+                        "detail": item.detail,
+                        "agent_label": item.agent_label,
+                        "required_fields": item.required_fields,
+                        "depends_on": item.depends_on
+                    })
+                else:
+                    checklist_dicts.append(item)
+            
+            # Send checklist generated event
+            yield f"data: {json.dumps({'type': 'checklist', 'data': checklist_dicts})}\n\n"
+            await asyncio.sleep(0.5)
+            
+            # 7. Send completion events for agents
+            for agent in agents_sequence:
+                yield f"data: {json.dumps({'type': 'agent_complete', 'agent': agent['label'], 'name': agent['name']})}\n\n"
+                await asyncio.sleep(1)
+            
+            # 8. Send final completion
+            yield f"data: {json.dumps({'type': 'complete', 'data': {'checklist': checklist_dicts, 'steps': result.get('steps', 0), 'address_change_result': result.get('address_change_result', {})}})}\n\n"
+            
+        except Exception as e:
+            print(f"SSE Error: {str(e)}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*"
+        }
+    )
+    
 # --- HEALTH CHECK ---
 @app.get("/health")
 def health_check():
@@ -543,4 +713,99 @@ def submit_move_details(data: MoveDetails, current_user: dict = Depends(get_curr
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save move: {str(e)}")
-    return {"status": "healthy", "service": "transitly-backend"}
+    
+# --- RUN AGENTS ---
+@app.post("/run-agents")
+def run_agents(current_user: dict = Depends(get_current_user)):
+    """
+    Run the agent orchestrator workflow for the current user's move.
+    Fetches user details and move information, then executes the agent workflow.
+    """
+    try:
+        user_id = current_user.get("sub")
+        
+        # 1. Fetch user info from Cognito token
+        user_details = {
+            "name": current_user.get("name", ""),
+            "email": current_user.get("email", ""),
+            "phone": current_user.get("phone_number", ""),
+        }
+        
+        # 2. Fetch latest move details from DynamoDB
+        try:
+            # Query moves table for this user's most recent move
+            response = moves_table.query(
+                KeyConditionExpression="userId = :uid",
+                ExpressionAttributeValues={":uid": user_id},
+                ScanIndexForward=False,  # Sort descending by moveId
+                Limit=1
+            )
+            
+            if response.get("Items"):
+                move = response["Items"][0]
+                user_details.update({
+                    "from_address": move.get("fromAddress", ""),
+                    "to_address": move.get("toAddress", ""),
+                    "moving_date": move.get("moveInDate", ""),
+                    "moving_out_date": move.get("moveOutDate", "")
+                })
+            else:
+                raise HTTPException(
+                    status_code=404, 
+                    detail="No move found for user. Please submit move details first."
+                )
+                
+        except ClientError as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to fetch move details: {str(e)}"
+            )
+        
+        # 3. Initialize orchestrator state
+        initial_state = {
+            "messages": [],
+            "user_id": user_id,
+            "user_details": user_details,
+            "checklist": [],
+            "steps": 0,
+            "done": False,
+            "next_task": "",
+            "reason": ""
+        }
+        
+        # 4. Run orchestrator
+        result = run_orchestrator_agent(initial_state)
+        
+        # 5. Convert ChecklistItem objects to dicts for JSON serialization
+        checklist_dicts = []
+        for item in result.get("checklist", []):
+            if isinstance(item, ChecklistItem):
+                checklist_dicts.append({
+                    "title": item.title,
+                    "status": item.status,
+                    "detail": item.detail,
+                    "agent_label": item.agent_label,
+                    "required_fields": item.required_fields,
+                    "depends_on": item.depends_on
+                })
+            else:
+                checklist_dicts.append(item)
+        
+        # 6. Return results
+        return {
+            "message": "Agent workflow completed",
+            "checklist": checklist_dicts,
+            "steps": result.get("steps", 0),
+            "done": result.get("done", False),
+            "user_details": result.get("user_details", {}),
+            "address_change_result": result.get("address_change_result", {})
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Agent workflow failed: {str(e)}"
+        )
+        

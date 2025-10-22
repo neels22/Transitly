@@ -4,6 +4,7 @@ export interface SignUpRequest {
   first_name: string;
   last_name: string;
   username: string;
+  phone: string; // ← ADDED
 }
 
 export interface SignUpResponse {
@@ -38,6 +39,7 @@ export interface SignInResponse {
     userId: string;
     email: string;
     name: string;
+    phone: string; // ← ADDED
     email_verified: boolean;
   };
 }
@@ -50,14 +52,14 @@ export interface ResendConfirmationResponse {
   message: string;
 }
 
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = "http://localhost:8000";
 
 class ApiError extends Error {
   public status: number;
-  
+
   constructor(status: number, message: string) {
     super(message);
-    this.name = 'ApiError';
+    this.name = "ApiError";
     this.status = status;
   }
 }
@@ -67,11 +69,11 @@ async function makeRequest<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
-  
+
   try {
     const response = await fetch(url, {
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
         ...options.headers,
       },
       ...options,
@@ -80,7 +82,7 @@ async function makeRequest<T>(
     const data = await response.json();
 
     if (!response.ok) {
-      throw new ApiError(response.status, data.detail || 'An error occurred');
+      throw new ApiError(response.status, data.detail || "An error occurred");
     }
 
     return data;
@@ -88,7 +90,7 @@ async function makeRequest<T>(
     if (error instanceof ApiError) {
       throw error;
     }
-    throw new ApiError(0, 'Network error or server unavailable');
+    throw new ApiError(0, "Network error or server unavailable");
   }
 }
 
@@ -97,14 +99,14 @@ async function makeFormRequest<T>(
   formData: Record<string, string>
 ): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
-  
+
   try {
     const body = new URLSearchParams(formData);
-    
+
     const response = await fetch(url, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
+        "Content-Type": "application/x-www-form-urlencoded",
       },
       body: body.toString(),
     });
@@ -112,7 +114,7 @@ async function makeFormRequest<T>(
     const data = await response.json();
 
     if (!response.ok) {
-      throw new ApiError(response.status, data.detail || 'An error occurred');
+      throw new ApiError(response.status, data.detail || "An error occurred");
     }
 
     return data;
@@ -120,43 +122,48 @@ async function makeFormRequest<T>(
     if (error instanceof ApiError) {
       throw error;
     }
-    throw new ApiError(0, 'Network error or server unavailable');
+    throw new ApiError(0, "Network error or server unavailable");
   }
 }
 
 export const authService = {
   async signUp(request: SignUpRequest): Promise<SignUpResponse> {
-    return makeFormRequest<SignUpResponse>('/signup', {
+    return makeFormRequest<SignUpResponse>("/signup", {
       email: request.email,
       password: request.password,
       first_name: request.first_name,
       last_name: request.last_name,
       username: request.username,
+      phone: request.phone, // ← ADDED
     });
   },
 
-  async confirmSignUp(request: ConfirmSignUpRequest): Promise<ConfirmSignUpResponse> {
-    return makeFormRequest<ConfirmSignUpResponse>('/confirm-signup', {
+  async confirmSignUp(
+    request: ConfirmSignUpRequest
+  ): Promise<ConfirmSignUpResponse> {
+    return makeFormRequest<ConfirmSignUpResponse>("/confirm-signup", {
       username: request.username,
       code: request.code,
     });
   },
 
   async signIn(request: SignInRequest): Promise<SignInResponse> {
-    return makeFormRequest<SignInResponse>('/signin', {
+    return makeFormRequest<SignInResponse>("/signin", {
       email: request.email,
       password: request.password,
     });
   },
 
-  async resendConfirmation(request: ResendConfirmationRequest): Promise<ResendConfirmationResponse> {
-    return makeFormRequest<ResendConfirmationResponse>('/resend-confirmation', {
+  async resendConfirmation(
+    request: ResendConfirmationRequest
+  ): Promise<ResendConfirmationResponse> {
+    return makeFormRequest<ResendConfirmationResponse>("/resend-confirmation", {
       username: request.username,
     });
   },
 
   async getCurrentUser(accessToken: string) {
-    return makeRequest('/me', {
+    return makeRequest("/me", {
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
@@ -164,7 +171,7 @@ export const authService = {
   },
 
   async refreshToken(refreshToken: string) {
-    return makeFormRequest('/refresh-token', {
+    return makeFormRequest("/refresh-token", {
       refresh_token: refreshToken,
     });
   },

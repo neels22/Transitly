@@ -8,9 +8,9 @@ from langgraph.checkpoint.memory import MemorySaver
 from langchain_google_genai import ChatGoogleGenerativeAI
 # from langchain_openai import ChatOpenAI
 
-from agent_state import AgentState, ChecklistItem
-from tools import update_amazon_address
-from config import Config
+from agents.agent_state import AgentState, ChecklistItem
+from agents.tools import update_amazon_address
+from agents.config import Config
 
 
 AGENT_LABEL = "amazon_address_change"  # must match your registry / planner

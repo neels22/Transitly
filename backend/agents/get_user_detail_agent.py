@@ -7,9 +7,9 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import AIMessage
 from langgraph.graph import StateGraph, END
 
-from agent_state import AgentState, ChecklistItem
-from tools import get_user_details
-from config import Config
+from agents.agent_state import AgentState, ChecklistItem
+from agents.tools import get_user_details
+from agents.config import Config
 
 AGENT_LABEL = "get_user_detail"  # keep in sync with your registry/planner
 

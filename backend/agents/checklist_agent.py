@@ -1,9 +1,9 @@
 # checklist_agent.py
 from langchain_core.prompts import ChatPromptTemplate
-from agent_state import AgentState, ChecklistItem
+from agents.agent_state import AgentState, ChecklistItem
 from langchain_google_genai import ChatGoogleGenerativeAI
 # from langchain_openai import ChatOpenAI
-from config import Config
+from agents.config import Config
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage
 from pydantic.v1 import BaseModel, Field
