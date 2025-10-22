@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useUser } from "../../context/user";
-import hamburgerIcon from "../../../assets/hamburger.svg";
+import fullLogo from "../../../assets/full-logo.svg";
 import Button from "../button";
 
 export default function Header() {
@@ -36,7 +36,7 @@ export default function Header() {
     <header className="flex justify-between items-center px-6 py-0 relative z-[60]">
       <div className="flex items-center">
         <img
-          src="/assets/full-logo.svg"
+          src={fullLogo}
           alt="Campus Marketplace"
           className="h-10 w-auto cursor-pointer"
           onClick={handleHomepageClick}
