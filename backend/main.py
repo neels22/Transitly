@@ -266,11 +266,34 @@ def signup(
                     "moveInDate": "2025-12-12",
                     "createdAt": "2025-10-20",
                 }
+                move_item2 = {
+                    "userId": user_sub,
+                    "fromAddress": "4321 Elm Street, Sunnyvale, CA 94085",
+                    "toAddress": "8765 Oak Avenue, Palo Alto, CA 94303",
+                    "moveOutDate": "2026-01-15",
+                    "moveInDate": "2026-01-16",
+                    "createdAt": "2025-10-21",
+                }
+
+                move_item3 = {
+                    "userId": user_sub,
+                    "fromAddress": "1010 Blossom Hill Rd, Los Gatos, CA 95032",
+                    "toAddress": "2222 Shoreline Blvd, Mountain View, CA 94043",
+                    "moveOutDate": "2025-11-05",
+                    "moveInDate": "2025-11-06",
+                    "createdAt": "2025-10-22",
+                }
                 # Compose deterministic moveId (userId#moveOutDate) and attach it
                 move_item1_id = f"{user_sub}#{move_item1['moveOutDate']}"
                 move_item1["moveId"] = move_item1_id
+                move_item2_id = f"{user_sub}#{move_item2['moveOutDate']}"
+                move_item2["moveId"] = move_item2_id
+                move_item3_id = f"{user_sub}#{move_item3['moveOutDate']}"
+                move_item3["moveId"] = move_item3_id
                 try:
                     moves_table.put_item(Item=move_item1)
+                    moves_table.put_item(Item=move_item2)
+                    moves_table.put_item(Item=move_item3)
                 except Exception as inner_e:
                     # Don't fail signup if seeding fails; just log
                     print(f"Failed to seed default move for {user_sub}: {str(inner_e)}")
@@ -299,11 +322,55 @@ def signup(
                     "title": "To do D",
                     "status": "todo",
                 }
+
+                checklist_item2_1 = {
+                    "checklistId": f"{move_item2_id}#cl1",
+                    "moveId": move_item2_id,
+                    "title": "To do A",
+                    "status": "failed",
+                }
+                checklist_item2_2 = {
+                    "checklistId": f"{move_item2_id}#cl2",
+                    "moveId": move_item2_id,
+                    "title": "To do B",
+                    "status": "todo",
+                }
+                checklist_item2_3 = {
+                    "checklistId": f"{move_item2_id}#cl3",
+                    "moveId": move_item2_id,
+                    "title": "To do C",
+                    "status": "todo",
+                }
+                checklist_item2_4 = {
+                    "checklistId": f"{move_item2_id}#cl4",
+                    "moveId": move_item2_id,
+                    "title": "To do D",
+                    "status": "todo",
+                }
+
+                checklist_item3_1 = {
+                    "checklistId": f"{move_item3_id}#cl1",
+                    "moveId": move_item3_id,
+                    "title": "To do A",
+                    "status": "todo",
+                }
+                checklist_item3_2 = {
+                    "checklistId": f"{move_item3_id}#cl2",
+                    "moveId": move_item3_id,
+                    "title": "To do B",
+                    "status": "todo",
+                }
                 try:
                     checklists_table.put_item(Item=checklist_item1_1)
                     checklists_table.put_item(Item=checklist_item1_2)
                     checklists_table.put_item(Item=checklist_item1_3)
                     checklists_table.put_item(Item=checklist_item1_4)
+                    checklists_table.put_item(Item=checklist_item2_1)
+                    checklists_table.put_item(Item=checklist_item2_2)
+                    checklists_table.put_item(Item=checklist_item2_3)
+                    checklists_table.put_item(Item=checklist_item2_4)
+                    checklists_table.put_item(Item=checklist_item3_1)
+                    checklists_table.put_item(Item=checklist_item3_2)
                 except Exception as inner_e:
                     print(f"Failed to seed default checklist for {user_sub}: {str(inner_e)}")
         except Exception as seed_e:
@@ -950,16 +1017,45 @@ def get_checklists(current_user: dict = Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to load checklists: {str(e)}")
 
-# --- DELETE CHECKLIST ---
-@app.delete("/checklist/{checklist_id}")
-def delete_checklist(checklist_id: str, current_user: dict = Depends(get_current_user)):
+# --- DELETE MOVE + ITS CHECKLIST ITEMS BY moveId ---
+@app.delete("/move/{move_id}")
+def delete_move_and_checklist(move_id: str, current_user: dict = Depends(get_current_user)):
     """
-    Temporarily simulate checklist deletion.
-    Later, integrate with DynamoDB to actually remove by ID.
+    Delete a move (TransitlyMoves) by moveId for the authenticated user and
+    remove all checklist items (TransitlyChecklists) that reference the same moveId.
     """
-    # Here you’d call DynamoDB to delete item
-    print(f"Deleting checklist {checklist_id} for user {current_user.get('sub')}")
-    return {"message": f"Checklist {checklist_id} deleted successfully."}
+    user_id = current_user.get("sub")
+
+    # 1 Delete the move item using the composite key (userId, moveId)
+    try:
+        moves_table.delete_item(
+            Key={"userId": user_id, "moveId": move_id},
+            ConditionExpression="attribute_exists(moveId)"
+        )
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            raise HTTPException(status_code=404, detail="Move not found")
+        raise HTTPException(status_code=500, detail=f"Failed to delete move: {str(e)}")
+
+    # 2 Find and delete all checklist items with this moveId
+    try:
+        cl_resp = checklists_table.scan(
+            FilterExpression="moveId = :mid",
+            ExpressionAttributeValues={":mid": move_id}
+        )
+        items = cl_resp.get("Items", [])
+
+        if items:
+            with checklists_table.batch_writer() as batch:
+                for item in items:
+                    checklist_pk = item.get("checklistId")
+                    if checklist_pk:
+                        batch.delete_item(Key={"checklistId": checklist_pk})
+    except ClientError as e:
+        # Move already deleted, but checklist cleanup failed
+        raise HTTPException(status_code=500, detail=f"Failed to delete checklist items: {str(e)}")
+
+    return {"message": "Move and associated checklist items deleted successfully.", "moveId": move_id}
 
 # --- CHAT WITH AGENT ---
 class ChatMessage(BaseModel):
