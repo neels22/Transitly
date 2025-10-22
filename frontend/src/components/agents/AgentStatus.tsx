@@ -16,12 +16,19 @@ interface Message {
   timestamp: Date;
 }
 
+interface HistoricalChecklistItem {
+  title: string;
+  status: string; // 'todo' | 'agentdone' | 'manualdone'
+}
+
 interface AgentModalProps {
   userId: string;
   onClose: () => void;
+  initialChecklist?: HistoricalChecklistItem[]; // when opening from a saved card
+  startStream?: boolean; // whether to start SSE run (default true)
 }
 
-export default function AgentStatus({ userId, onClose }: AgentModalProps) {
+export default function AgentStatus({ userId, onClose, initialChecklist, startStream = true }: AgentModalProps) {
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -44,6 +51,25 @@ export default function AgentStatus({ userId, onClose }: AgentModalProps) {
   }, [messages]);
 
   useEffect(() => {
+    // If we're opening a historical card, preload the checklist and skip SSE
+    if (!startStream) {
+      const mapped: ChecklistItem[] = (initialChecklist || []).map((item, idx) => ({
+        id: String(idx + 1),
+        title: item.title,
+        status:
+          item.status === "agentdone"
+            ? "agent_done"
+            : item.status === "manualdone"
+            ? "user_done"
+            : "pending",
+        agent_label: null,
+        detail: "",
+      }));
+      setChecklist(mapped);
+      setIsRunning(false);
+      return;
+    }
+
     const token = localStorage.getItem("id_token");
     if (!token) {
       addAIMessage("Error: Not authenticated. Please sign in.");
@@ -128,7 +154,7 @@ export default function AgentStatus({ userId, onClose }: AgentModalProps) {
       abortController.abort();
       console.log("SSE cleanup: connection aborted");
     };
-  }, [userId]);
+  }, [userId, startStream]);
   
   const handleSSEMessage = (data: any) => {
     switch (data.type) {

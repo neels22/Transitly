@@ -1,10 +1,11 @@
 version: "3.9"
+name: dev_transitly_server
 services:
-  backend:
+  svc:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: transitly-backend
+    container_name: svc
     ports:
       - "8000:8000"
     env_file:
@@ -16,7 +17,7 @@ services:
 
   dynamodb:
     image: amazon/dynamodb-local
-    container_name: transitly-dynamodb
+    container_name: dynamodb
     command: "-jar DynamoDBLocal.jar -inMemory -sharedDb"
     ports:
       - "8001:8000"       # host:container

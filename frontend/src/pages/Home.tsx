@@ -39,6 +39,7 @@ export default function Home() {
   });
   const [isLoading, setIsLoading] = useState(false);
   const [showAgentModal, setShowAgentModal] = useState(false);
+  const [modalChecklist, setModalChecklist] = useState<any[] | null>(null);
   const [userId, setUserId] = useState<string>("");
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [checklistCards, setChecklistCards] = useState<any[]>([]);
@@ -264,7 +265,15 @@ export default function Home() {
 
       {/* Agent Modal */}
       {showAgentModal && (
-        <AgentModal userId={userId} onClose={() => setShowAgentModal(false)} />
+        <AgentModal
+          userId={userId}
+          onClose={() => {
+            setShowAgentModal(false);
+            setModalChecklist(null);
+          }}
+          initialChecklist={modalChecklist || undefined}
+          startStream={!modalChecklist}
+        />
       )}
 
       {/* 🔽 Content Section - Artwork OR Checklist Cards */}
@@ -287,7 +296,17 @@ export default function Home() {
               </h2>
               <div className="flex flex-wrap gap-20 justify-center">
                 {checklistCards.map((card) => (
-                  <ChecklistCard key={card.checklistId} {...card} />
+                  <ChecklistCard
+                    key={card.checklistId}
+                    {...card}
+                    onClick={() => {
+                      setModalChecklist(card.checklist || []);
+                      setShowAgentModal(true);
+                    }}
+                    onDelete={async () => {
+                      await refreshChecklists();
+                    }}
+                  />
                 ))}
               </div>
             </>
