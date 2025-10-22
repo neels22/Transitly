@@ -544,3 +544,62 @@ def submit_move_details(data: MoveDetails, current_user: dict = Depends(get_curr
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save move: {str(e)}")
     return {"status": "healthy", "service": "transitly-backend"}
+
+# --- DUMMY CHECKLISTS ENDPOINT ---
+@app.get("/checklists")
+def get_checklists():
+    """Return dummy checklists for now (to be replaced with DynamoDB query later)"""
+    dummy_checklists = [
+        {
+            "checklistId": "cl1",
+            "createdAt": "2025-10-20",
+            "fromAddress": "1234 Lane lane, Drive drive, San Jose, CA 987653",
+            "toAddress": "5678 Driveway driveway, San Mateo, CA 987654",
+            "moveOutDate": "2025-12-12",
+            "moveInDate": "2025-12-12",
+            "checklist": [
+                {"title": "To do A", "status": "agentdone"},
+                {"title": "To do B", "status": "manualdone"},
+                {"title": "To do C", "status": "failed"},
+                {"title": "To do D", "status": "todo"},
+            ],
+        },
+        {
+            "checklistId": "cl2",
+            "createdAt": "2025-10-20",
+            "fromAddress": "1234 Lane lane, Drive drive, San Jose, CA 987653",
+            "toAddress": "5678 Driveway driveway, San Mateo, CA 987654",
+            "moveOutDate": "2025-12-12",
+            "moveInDate": "2025-12-12",
+            "checklist": [
+                {"title": "To do A", "status": "failed"},
+                {"title": "To do B", "status": "todo"},
+                {"title": "To do C", "status": "todo"},
+                {"title": "To do D", "status": "todo"},
+            ],
+        },
+        {
+            "checklistId": "cl3",
+            "createdAt": "2025-10-20",
+            "fromAddress": "1234 Lane lane, Drive drive, San Jose, CA 987653",
+            "toAddress": "5678 Driveway driveway, San Mateo, CA 987654",
+            "moveOutDate": "2025-12-12",
+            "moveInDate": "2025-12-12",
+            "checklist": [
+                {"title": "To do A", "status": "todo"},
+                {"title": "To do B", "status": "todo"}
+            ],
+        },
+    ]
+    return {"checklists": dummy_checklists}
+
+# --- DELETE CHECKLIST ---
+@app.delete("/checklist/{checklist_id}")
+def delete_checklist(checklist_id: str, current_user: dict = Depends(get_current_user)):
+    """
+    Temporarily simulate checklist deletion.
+    Later, integrate with DynamoDB to actually remove by ID.
+    """
+    # Here you’d call DynamoDB to delete item
+    print(f"Deleting checklist {checklist_id} for user {current_user.get('sub')}")
+    return {"message": f"Checklist {checklist_id} deleted successfully."}

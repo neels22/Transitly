@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import DatePicker from "react-datepicker";
 import Input from "../components/input";
 import Notification from "../components/notification";
@@ -7,6 +7,7 @@ import goButton from "../../assets/go-button.svg";
 import locationIcon from "../../assets/location.svg";
 import calendarIcon from "../../assets/calendar.svg";
 import AddressAutocomplete from "../components/address/AddressAutoComplete";
+import { ChecklistCard } from "../components/chatcard";
 
 const Field = ({
   icon,
@@ -35,6 +36,23 @@ export default function Home() {
     type: "success" as "success" | "error",
   });
   const [isLoading, setIsLoading] = useState(false);
+  const [checklistCards, setChecklistCards] = useState<any[]>([]);
+
+  // --- Fetch checklists on page load ---
+  useEffect(() => {
+    const fetchChecklists = async () => {
+      try {
+        const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/checklists`);
+        if (!res.ok) throw new Error("Failed to fetch checklists");
+        const data = await res.json();
+        setChecklistCards(data.checklists || []);
+      } catch (err) {
+        console.error("Error loading checklists:", err);
+      }
+    };
+
+    fetchChecklists();
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -204,6 +222,20 @@ export default function Home() {
           setNotification((prev) => ({ ...prev, show: false }))
         }
       />
+
+      {/* 🔽 Checklist Cards */}
+      {checklistCards.length > 0 && (
+        <div className="w-full max-w-7xl px-6 py-10 mt-[320px] mb-12">
+          <h2 className="text-lg font-semibold mb-15 pl-2 text-left">
+            Previous Chats:
+          </h2>
+          <div className="flex flex-wrap gap-20 justify-center">
+            {checklistCards.map((card) => (
+              <ChecklistCard key={card.checklistId} {...card} />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
