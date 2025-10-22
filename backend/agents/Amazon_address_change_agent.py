@@ -213,71 +213,162 @@ class AmazonAddressChangeAgent:
 
         return out
 
+    # def _parse_address(self, address_str: str) -> Dict[str, str]:
+    #     """
+    #     Parse an address string into components.
+    #     Expected format: "street, city, state zip" or "street, city, state"
+    #     This is a simple parser - you may want to use a library like usaddress for production.
+    #     """
+    #     import re
+        
+    #     parts = {}
+        
+    #     # Try to parse: "123 Main St, City, State ZIP"
+    #     # or "123 Main St Apt 2, City, State ZIP"
+    #     address_str = address_str.strip()
+        
+    #     # Split by comma
+    #     segments = [s.strip() for s in address_str.split(",")]
+        
+    #     if len(segments) >= 3:
+    #         # segments[0] = street (possibly with unit)
+    #         parts["street"] = segments[0]
+    #         parts["city"] = segments[1]
+            
+    #         # segments[2] should be "State ZIP" or just "State"
+    #         state_zip = segments[2].strip()
+            
+    #         # Try to extract state and zip
+    #         match = re.search(r'([A-Z]{2})\s*(\d{5}(?:-\d{4})?)?', state_zip)
+    #         if match:
+    #             parts["state"] = match.group(1)
+    #             parts["zip"] = match.group(2) or ""
+    #         else:
+    #             # Try state name
+    #             state_parts = state_zip.split()
+    #             if state_parts:
+    #                 parts["state"] = state_parts[0][:2].upper()  # Take first 2 chars
+    #                 if len(state_parts) > 1 and state_parts[-1].isdigit():
+    #                     parts["zip"] = state_parts[-1]
+    #     elif len(segments) == 2:
+    #         # "street, city state zip"
+    #         parts["street"] = segments[0]
+    #         city_state_zip = segments[1].strip()
+            
+    #         # Try to extract city, state, zip
+    #         match = re.search(r'(.+?)\s+([A-Z]{2})\s*(\d{5}(?:-\d{4})?)?', city_state_zip)
+    #         if match:
+    #             parts["city"] = match.group(1).strip()
+    #             parts["state"] = match.group(2)
+    #             parts["zip"] = match.group(3) or ""
+    #     else:
+    #         # Fallback: just use the whole string as street
+    #         parts["street"] = address_str
+    #         parts["city"] = ""
+    #         parts["state"] = ""
+    #         parts["zip"] = ""
+        
+    #     # Set defaults for missing parts
+    #     parts.setdefault("street", "")
+    #     parts.setdefault("city", "")
+    #     parts.setdefault("state", "")
+    #     parts.setdefault("zip", "")
+    #     parts.setdefault("unit", "")
+    #     parts.setdefault("country", "United States")
+        
+    #     return parts
+
     def _parse_address(self, address_str: str) -> Dict[str, str]:
         """
-        Parse an address string into components.
-        Expected format: "street, city, state zip" or "street, city, state"
-        This is a simple parser - you may want to use a library like usaddress for production.
+        Parse an address string into components for Amazon form.
+        Converts state abbreviations to full names for Amazon's dropdown.
         """
         import re
         
-        parts = {}
+        parts = {
+            "street": "",
+            "city": "",
+            "state": "",
+            "zip": "",
+            "unit": "",
+            "country": "United States"
+        }
         
-        # Try to parse: "123 Main St, City, State ZIP"
-        # or "123 Main St Apt 2, City, State ZIP"
+        # State abbreviation to full name mapping (for Amazon dropdown)
+        state_full_name_map = {
+            "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
+            "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware",
+            "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho",
+            "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas",
+            "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine", "MD": "Maryland",
+            "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi",
+            "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada",
+            "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York",
+            "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma",
+            "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina",
+            "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah",
+            "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia",
+            "WI": "Wisconsin", "WY": "Wyoming"
+        }
+        
+        if not address_str:
+            return parts
+        
         address_str = address_str.strip()
         
-        # Split by comma
-        segments = [s.strip() for s in address_str.split(",")]
+        # First, try to extract ZIP code (5 digits or 5+4 format)
+        zip_match = re.search(r'\b(\d{5}(?:-\d{4})?)\b', address_str)
+        if zip_match:
+            parts["zip"] = zip_match.group(1)
+            # Remove ZIP from string for further processing
+            address_str = address_str[:zip_match.start()] + address_str[zip_match.end():]
         
-        if len(segments) >= 3:
-            # segments[0] = street (possibly with unit)
-            parts["street"] = segments[0]
-            parts["city"] = segments[1]
-            
-            # segments[2] should be "State ZIP" or just "State"
-            state_zip = segments[2].strip()
-            
-            # Try to extract state and zip
-            match = re.search(r'([A-Z]{2})\s*(\d{5}(?:-\d{4})?)?', state_zip)
-            if match:
-                parts["state"] = match.group(1)
-                parts["zip"] = match.group(2) or ""
-            else:
-                # Try state name
-                state_parts = state_zip.split()
-                if state_parts:
-                    parts["state"] = state_parts[0][:2].upper()  # Take first 2 chars
-                    if len(state_parts) > 1 and state_parts[-1].isdigit():
-                        parts["zip"] = state_parts[-1]
-        elif len(segments) == 2:
-            # "street, city state zip"
-            parts["street"] = segments[0]
-            city_state_zip = segments[1].strip()
-            
-            # Try to extract city, state, zip
-            match = re.search(r'(.+?)\s+([A-Z]{2})\s*(\d{5}(?:-\d{4})?)?', city_state_zip)
-            if match:
-                parts["city"] = match.group(1).strip()
-                parts["state"] = match.group(2)
-                parts["zip"] = match.group(3) or ""
-        else:
-            # Fallback: just use the whole string as street
-            parts["street"] = address_str
-            parts["city"] = ""
-            parts["state"] = ""
-            parts["zip"] = ""
+        # Try to extract state - look for 2-letter state code
+        state_match = re.search(r'\b([A-Z]{2})\b', address_str)
+        if state_match:
+            state_abbrev = state_match.group(1)
+            # Convert abbreviation to full name for Amazon dropdown
+            parts["state"] = state_full_name_map.get(state_abbrev, state_abbrev)
+            # Remove state from string
+            address_str = address_str[:state_match.start()] + address_str[state_match.end():]
         
-        # Set defaults for missing parts
-        parts.setdefault("street", "")
-        parts.setdefault("city", "")
-        parts.setdefault("state", "")
-        parts.setdefault("zip", "")
-        parts.setdefault("unit", "")
-        parts.setdefault("country", "United States")
+        # Clean up extra commas and whitespace
+        address_str = re.sub(r'\s*,\s*,\s*', ', ', address_str)
+        address_str = re.sub(r'\s+', ' ', address_str).strip()
+        
+        # Split by comma to get remaining parts
+        segments = [s.strip() for s in address_str.split(',') if s.strip()]
+        
+        if len(segments) >= 2:
+            # First segment is likely street address
+            parts["street"] = segments[0]
+            
+            # Last segment (or second to last) is likely city
+            # Filter out empty segments and state codes
+            city_candidates = [s for s in segments[1:] if s.strip() and not re.match(r'^[A-Z]{2}$', s.strip())]
+            if city_candidates:
+                parts["city"] = city_candidates[-1].strip()
+            
+            # Check middle segments for apartment/unit info
+            for seg in segments[1:-1]:
+                if any(keyword in seg.lower() for keyword in ['apt', 'unit', 'suite', '#', 'floor']):
+                    parts["unit"] = seg.strip()
+                    break
+                    
+        elif len(segments) == 1:
+            # Only one segment, try to parse "Street City State ZIP" format
+            parts["street"] = segments[0]
+        
+        # Final cleanup
+        parts["street"] = parts["street"].strip(' ,')
+        parts["city"] = parts["city"].strip(' ,')
+        parts["zip"] = parts["zip"].strip(' ,')
+        
+        # Default to California if state is still missing (for demo purposes)
+        if not parts["state"]:
+            parts["state"] = "California"
         
         return parts
-
     def _should_continue(self, state: AgentState) -> str:
         # If we have a proceed=true decision, go call the tool; else end.
         scratch = state.get("amazon_scratch", {}) or {}
