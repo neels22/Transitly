@@ -9,6 +9,7 @@ AWS_REGION = os.environ.get("AWS_REGION", "us-west-2")
 DYNAMODB_ENDPOINT = os.environ.get("DYNAMODB_ENDPOINT")
 DDB_TABLE = os.environ.get("DDB_TABLE", "TransitlyUsers")
 DDB_MOVES_TABLE = os.environ.get("DDB_MOVES_TABLE", "TransitlyMoves")
+DDB_CHECKLISTS_TABLE = os.environ.get("DDB_CHECKLISTS_TABLE", "TransitlyChecklists")
 
 boto_kwargs = {"region_name": AWS_REGION}
 if DYNAMODB_ENDPOINT:
@@ -16,6 +17,7 @@ if DYNAMODB_ENDPOINT:
 dynamodb = boto3.resource("dynamodb", **boto_kwargs)
 users_table = dynamodb.Table(DDB_TABLE)
 moves_table = dynamodb.Table(DDB_MOVES_TABLE)
+checklists_table = dynamodb.Table(DDB_CHECKLISTS_TABLE)
 
 @tool
 def get_user_details(user_id: str) -> Dict[str, Any]:

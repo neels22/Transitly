@@ -13,7 +13,7 @@ from botocore.exceptions import ClientError
 from jose import JWTError, jwt
 from jose.exceptions import JWKError
 import base64
-from datetime import date
+from datetime import date, datetime
 from pydantic import BaseModel
 import re
 from dotenv import load_dotenv
@@ -44,6 +44,7 @@ REDIRECT_URI = os.environ.get("REDIRECT_URI", "http://localhost:8000/auth/callba
 AWS_REGION = os.environ.get("AWS_REGION", "us-west-2")
 DDB_TABLE = os.environ.get("DDB_TABLE", "TransitlyUsers")
 DDB_MOVES_TABLE = os.environ.get("DDB_MOVES_TABLE", "TransitlyMoves")
+DDB_CHECKLISTS_TABLE = os.environ.get("DDB_CHECKLISTS_TABLE", "TransitlyChecklists")
 DYNAMODB_ENDPOINT = os.environ.get("DYNAMODB_ENDPOINT")
 USER_POOL_ID = os.environ.get("USER_POOL_ID")  # Add this to .env
 
@@ -54,6 +55,7 @@ if DYNAMODB_ENDPOINT:
 dynamodb = boto3.resource("dynamodb", **boto_kwargs)
 users_table = dynamodb.Table(DDB_TABLE)
 moves_table = dynamodb.Table(DDB_MOVES_TABLE)
+checklists_table = dynamodb.Table(DDB_CHECKLISTS_TABLE)
 
 # === Setup Cognito client ===
 cognito_client = boto3.client("cognito-idp", region_name=AWS_REGION)
@@ -164,6 +166,39 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
     payload = verify_jwt_token(credentials.credentials)
     return payload
 
+def save_checklist_to_db(user_id: str, move_id: str, checklist: List[Dict[str, Any]], move_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Save generated checklist to TransitlyChecklists table
+    
+    Args:
+        user_id: User ID
+        move_id: Move ID (userId#moveOutDate)
+        checklist: List of checklist items
+        move_data: Move details (from/to addresses, dates)
+    
+    Returns:
+        The saved checklist item
+    """
+    
+    checklist_item = {
+        "userId": user_id,
+        "moveId": move_id,
+        "checklist": checklist,
+        "fromAddress": move_data.get("fromAddress", ""),
+        "toAddress": move_data.get("toAddress", ""),
+        "moveOutDate": move_data.get("moveOutDate", ""),
+        "moveInDate": move_data.get("moveInDate", ""),
+        "createdAt": datetime.utcnow().isoformat(),
+        "updatedAt": datetime.utcnow().isoformat()
+    }
+    
+    try:
+        checklists_table.put_item(Item=checklist_item)
+        return checklist_item
+    except Exception as e:
+        print(f"Failed to save checklist to database: {str(e)}")
+        raise
+
 # --- MOVE DATA MODEL ---
 class MoveDetails(BaseModel):
     from_address: str
@@ -216,7 +251,65 @@ def signup(
             signup_params["SecretHash"] = secret_hash
         
         response = cognito_client.sign_up(**signup_params)
-        
+
+        # After successful signup, seed default move + checklist data
+        try:
+            user_sub = response.get("UserSub")
+            if user_sub:
+
+                # Insert TransitlyMoves record
+                move_item1 = {
+                    "userId": user_sub,
+                    "fromAddress": "1234 Lane lane, Drive drive, San Jose, CA 987653",
+                    "toAddress": "5678 Driveway driveway, San Mateo, CA 987654",
+                    "moveOutDate": "2025-12-12",
+                    "moveInDate": "2025-12-12",
+                    "createdAt": "2025-10-20",
+                }
+                # Compose deterministic moveId (userId#moveOutDate) and attach it
+                move_item1_id = f"{user_sub}#{move_item1['moveOutDate']}"
+                move_item1["moveId"] = move_item1_id
+                try:
+                    moves_table.put_item(Item=move_item1)
+                except Exception as inner_e:
+                    # Don't fail signup if seeding fails; just log
+                    print(f"Failed to seed default move for {user_sub}: {str(inner_e)}")
+
+                checklist_item1_1 = {
+                    "checklistId": f"{move_item1_id}#cl1",
+                    "moveId": move_item1_id,
+                    "title": "To do A",
+                    "status": "agentdone",
+                }
+                checklist_item1_2 = {
+                    "checklistId": f"{move_item1_id}#cl2",
+                    "moveId": move_item1_id,
+                    "title": "To do B",
+                    "status": "manualdone",
+                }
+                checklist_item1_3 = {
+                    "checklistId": f"{move_item1_id}#cl3",
+                    "moveId": move_item1_id,
+                    "title": "To do C",
+                    "status": "failed",
+                }
+                checklist_item1_4 = {
+                    "checklistId": f"{move_item1_id}#cl4",
+                    "moveId": move_item1_id,
+                    "title": "To do D",
+                    "status": "todo",
+                }
+                try:
+                    checklists_table.put_item(Item=checklist_item1_1)
+                    checklists_table.put_item(Item=checklist_item1_2)
+                    checklists_table.put_item(Item=checklist_item1_3)
+                    checklists_table.put_item(Item=checklist_item1_4)
+                except Exception as inner_e:
+                    print(f"Failed to seed default checklist for {user_sub}: {str(inner_e)}")
+        except Exception as seed_e:
+            # Swallow any seeding errors to not block signup
+            print(f"Post-signup seeding error: {str(seed_e)}")
+
         return {
             "message": "Signup successful. Check your email for verification code.",
             "user_sub": response.get("UserSub"),
@@ -653,7 +746,7 @@ async def run_agents_stream(current_user: dict = Depends(get_current_user)):
             # Send checklist generated event
             yield f"data: {json.dumps({'type': 'checklist', 'data': checklist_dicts})}\n\n"
             await asyncio.sleep(0.5)
-            
+
             # 6. Send final completion
             yield f"data: {json.dumps({'type': 'complete', 'data': {'checklist': checklist_dicts, 'steps': result.get('steps', 0), 'address_change_result': result.get('address_change_result', {})}})}\n\n"
             
@@ -778,7 +871,7 @@ def run_agents(current_user: dict = Depends(get_current_user)):
                 })
             else:
                 checklist_dicts.append(item)
-        
+
         # 6. Return results
         return {
             "message": "Agent workflow completed",
@@ -799,53 +892,63 @@ def run_agents(current_user: dict = Depends(get_current_user)):
         
     return {"status": "healthy", "service": "transitly-backend"}
 
-# --- DUMMY CHECKLISTS ENDPOINT ---
+# --- CHECKLISTS ENDPOINT ---
 @app.get("/checklists")
-def get_checklists():
-    """Return dummy checklists for now (to be replaced with DynamoDB query later)"""
-    dummy_checklists = [
-        {
-            "checklistId": "cl1",
-            "createdAt": "2025-10-20",
-            "fromAddress": "1234 Lane lane, Drive drive, San Jose, CA 987653",
-            "toAddress": "5678 Driveway driveway, San Mateo, CA 987654",
-            "moveOutDate": "2025-12-12",
-            "moveInDate": "2025-12-12",
-            "checklist": [
-                {"title": "To do A", "status": "agentdone"},
-                {"title": "To do B", "status": "manualdone"},
-                {"title": "To do C", "status": "failed"},
-                {"title": "To do D", "status": "todo"},
-            ],
-        },
-        {
-            "checklistId": "cl2",
-            "createdAt": "2025-10-20",
-            "fromAddress": "1234 Lane lane, Drive drive, San Jose, CA 987653",
-            "toAddress": "5678 Driveway driveway, San Mateo, CA 987654",
-            "moveOutDate": "2025-12-12",
-            "moveInDate": "2025-12-12",
-            "checklist": [
-                {"title": "To do A", "status": "failed"},
-                {"title": "To do B", "status": "todo"},
-                {"title": "To do C", "status": "todo"},
-                {"title": "To do D", "status": "todo"},
-            ],
-        },
-        {
-            "checklistId": "cl3",
-            "createdAt": "2025-10-20",
-            "fromAddress": "1234 Lane lane, Drive drive, San Jose, CA 987653",
-            "toAddress": "5678 Driveway driveway, San Mateo, CA 987654",
-            "moveOutDate": "2025-12-12",
-            "moveInDate": "2025-12-12",
-            "checklist": [
-                {"title": "To do A", "status": "todo"},
-                {"title": "To do B", "status": "todo"}
-            ],
-        },
-    ]
-    return {"checklists": dummy_checklists}
+def get_checklists(current_user: dict = Depends(get_current_user)):
+    """Return aggregated checklists for the authenticated user.
+
+    Flow:
+    1) Query TransitlyMoves by userId
+    2) For each moveId, query TransitlyChecklists and aggregate items
+    """
+    try:
+        user_id = current_user.get("sub")
+
+        # 1) Get all moves for this user (latest first)
+        moves_resp = moves_table.query(
+            KeyConditionExpression="userId = :uid",
+            ExpressionAttributeValues={":uid": user_id},
+            ScanIndexForward=False
+        )
+
+        moves = moves_resp.get("Items", [])
+        if not moves:
+            return {"checklists": []}
+
+        aggregated = []
+        for move in moves:
+            move_id = move.get("moveId")
+            if not move_id:
+                continue
+
+            # 2) Get checklist items for this moveId using scan
+            cl_resp = checklists_table.scan(
+                FilterExpression="moveId = :mid",
+                ExpressionAttributeValues={":mid": move_id}
+            )
+
+            items = cl_resp.get("Items", [])
+            checklist = [
+                {"title": i.get("title", ""), "status": i.get("status", "todo")}
+                for i in items
+            ]
+
+            aggregated.append({
+                "checklistId": move_id,  # use moveId as stable identifier for the card
+                "createdAt": move.get("createdAt", datetime.utcnow().isoformat()),
+                "fromAddress": move.get("fromAddress", ""),
+                "toAddress": move.get("toAddress", ""),
+                "moveOutDate": move.get("moveOutDate", ""),
+                "moveInDate": move.get("moveInDate", ""),
+                "checklist": checklist,
+            })
+
+        return {"checklists": aggregated}
+
+    except ClientError as e:
+        raise HTTPException(status_code=500, detail=f"DynamoDB error: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load checklists: {str(e)}")
 
 # --- DELETE CHECKLIST ---
 @app.delete("/checklist/{checklist_id}")

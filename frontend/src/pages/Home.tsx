@@ -66,8 +66,10 @@ export default function Home() {
 
     const fetchChecklists = async () => {
       try {
+        const token = localStorage.getItem("id_token");
         const res = await fetch(
-          `${import.meta.env.VITE_API_BASE_URL}/checklists`
+          `${import.meta.env.VITE_API_BASE_URL}/checklists?userId=${userId}`,
+          { headers: { Authorization: `Bearer ${token}` } }
         );
         if (!res.ok) throw new Error("Failed to fetch checklists");
         const data = await res.json();
@@ -79,6 +81,21 @@ export default function Home() {
 
     fetchChecklists();
   }, [isSignedIn]);
+
+  const refreshChecklists = async () => {
+    if (!isSignedIn) return;
+    try {
+      const token = localStorage.getItem("id_token");
+      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/checklists?userId=${userId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Failed to fetch checklists");
+      const data = await res.json();
+      setChecklistCards(data.checklists || []);
+    } catch (err) {
+      console.error("Error refreshing checklists:", err);
+    }
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
