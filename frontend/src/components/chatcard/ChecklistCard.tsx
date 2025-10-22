@@ -4,6 +4,9 @@ import calendarIcon from "../../../assets/calendar.svg";
 type ChecklistItem = {
   title: string;
   status: string; // 'todo' | 'agentdone' | 'manualdone'
+  checklistId?: string;
+  agent_label?: string;
+  detail?: string;
 };
 
 type ChecklistCardProps = {
@@ -112,15 +115,15 @@ export default function ChecklistCard({
           const isManualDone = item.status === "manualdone"; 
 
           const checkColor = isAgentDone
-            ? "text-blue-500"
-            : isManualDone
             ? "text-red-500"
+            : isManualDone
+            ? "text-blue-500"
             : "text-gray-400";
 
           const strikeColor = isAgentDone
-            ? "decoration-blue-500"
-            : isManualDone
             ? "decoration-red-500"
+            : isManualDone
+            ? "decoration-blue-500"
             : "decoration-gray-400";
 
           return (
@@ -132,9 +135,9 @@ export default function ChecklistCard({
               <div
                 className={`w-5 h-5 flex items-center justify-center rounded-md border ${
                   isAgentDone
-                    ? "border-blue-500 bg-blue-50"
-                    : isManualDone
                     ? "border-red-500 bg-red-50"
+                    : isManualDone
+                    ? "border-blue-500 bg-blue-50"
                     : "border-gray-300 bg-gray-100"
                 }`}
               >

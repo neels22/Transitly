@@ -1004,7 +1004,13 @@ def get_checklists(current_user: dict = Depends(get_current_user)):
 
             items = cl_resp.get("Items", [])
             checklist = [
-                {"title": i.get("title", ""), "status": i.get("status", "todo")}
+                {
+                    "title": i.get("title", ""), 
+                    "status": i.get("status", "todo"),
+                    "checklistId": i.get("checklistId", ""),
+                    "agent_label": i.get("agent_label"),
+                    "detail": i.get("detail", "")
+                }
                 for i in items
             ]
 
@@ -1164,6 +1170,76 @@ def save_checklist(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to save checklist: {str(e)}"
+        )
+
+# --- UPDATE CHECKLIST ITEM STATUS ---
+class UpdateChecklistStatusRequest(BaseModel):
+    checklist_id: str
+    status: str  # "todo" or "manualdone"
+
+@app.post("/update-checklist-status")
+def update_checklist_status(
+    data: UpdateChecklistStatusRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Update the status of a single checklist item.
+    """
+    try:
+        user_id = current_user.get("sub")
+        print(f"[Backend] Received update-checklist-status request for user {user_id}")
+        print(f"[Backend] Checklist ID: {data.checklist_id}, Status: {data.status}")
+        
+        # Validate status
+        if data.status not in ["todo", "manualdone"]:
+            raise HTTPException(
+                status_code=400,
+                detail="Status must be 'todo' or 'manualdone'"
+            )
+        
+        # Update the checklist item
+        try:
+            response = checklists_table.update_item(
+                Key={"checklistId": data.checklist_id},
+                UpdateExpression="SET #status = :status, updatedAt = :updated_at",
+                ExpressionAttributeNames={
+                    "#status": "status"
+                },
+                ExpressionAttributeValues={
+                    ":status": data.status,
+                    ":updated_at": datetime.utcnow().isoformat()
+                },
+                ReturnValues="ALL_NEW"
+            )
+            
+            updated_item = response.get("Attributes", {})
+            print(f"[Backend] Successfully updated checklist item: {data.checklist_id}")
+            
+            return {
+                "message": "Checklist item status updated successfully",
+                "checklist_id": data.checklist_id,
+                "status": data.status,
+                "updated_at": updated_item.get("updatedAt")
+            }
+            
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'ResourceNotFoundException':
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Checklist item not found: {data.checklist_id}"
+                )
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to update checklist item: {str(e)}"
+                )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to update checklist status: {str(e)}"
         )
 
 # --- CHAT WITH AGENT ---

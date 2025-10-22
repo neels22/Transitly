@@ -7,6 +7,8 @@ interface ChecklistItem {
   status: "todo" | "agentdone" | "manualdone";
   agent_label: string | null;
   detail?: string;
+  checklistId?: string;
+  moveId?: string;
 }
 
 interface Message {
@@ -63,8 +65,9 @@ export default function AgentStatus({ userId, onClose, initialChecklist, startSt
             : item.status === "manualdone"
             ? "manualdone"
             : "todo",
-        agent_label: null,
-        detail: "",
+        agent_label: item.agent_label || null,
+        detail: item.detail || "",
+        checklistId: item.checklistId, // Use the real checklistId from backend
       }));
       setChecklist(mapped);
       setIsRunning(false);
@@ -174,6 +177,7 @@ export default function AgentStatus({ userId, onClose, initialChecklist, startSt
           status: item.status === "done" ? "agentdone" : "todo",
           agent_label: item.agent_label,
           detail: item.detail || "",
+          checklistId: `temp#cl${idx + 1}`, // Temporary ID until saved to backend
         }));
         setChecklist(newChecklist);
         addAIMessage(
@@ -243,25 +247,90 @@ export default function AgentStatus({ userId, onClose, initialChecklist, startSt
     // Mark this item as saving
     setSavingItems(prev => new Set(prev).add(id));
     
+    // Find the current item to get its checklistId
+    const currentItem = checklist.find(item => item.id === id);
+    if (!currentItem) {
+      console.error("Item not found:", id);
+      setSavingItems(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(id);
+        return newSet;
+      });
+      return;
+    }
+    
+    // Determine new status
+    const newStatus = currentItem.status === "manualdone" ? "todo" : "manualdone";
+    
+    // Update local state immediately for better UX
     setChecklist((prev) =>
       prev.map((item) =>
         item.id === id
           ? {
               ...item,
-              status: item.status === "manualdone" ? "todo" : "manualdone",
+              status: newStatus,
             }
           : item
       )
     );
     
-    // Auto-save the checklist when status changes
     try {
-      await handleChecklistSave();
+      const token = localStorage.getItem("id_token");
+      if (!token) {
+        console.error("No authentication token found");
+        addAIMessage("❌ Authentication error. Please sign in again.");
+        return;
+      }
+
+      // Use the checklistId from the item, or show error if not present
+      if (!currentItem.checklistId) {
+        console.error("No checklistId found for item:", currentItem);
+        addAIMessage("❌ Cannot update item - missing checklist ID. This item needs to be saved first.");
+        return;
+      }
+      
+      console.log(`[AgentModal] Updating checklist item ${currentItem.checklistId} to status: ${newStatus}`);
+
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/update-checklist-status`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            checklist_id: currentItem.checklistId,
+            status: newStatus,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Failed to update checklist status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log("[AgentModal] Checklist item status updated successfully:", result);
+      
       // Add subtle success message
-      addAIMessage("✓ Checklist updated and saved");
+      addAIMessage(`✓ ${currentItem.title} marked as ${newStatus === "manualdone" ? "completed" : "pending"}`);
+      
     } catch (error) {
-      console.error("Failed to auto-save checklist:", error);
-      addAIMessage("❌ Failed to save changes. Please try again.");
+      console.error("Failed to update checklist item status:", error);
+      addAIMessage("❌ Failed to update status. Please try again.");
+      
+      // Revert the local state change on error
+      setChecklist((prev) =>
+        prev.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                status: currentItem.status, // Revert to original status
+              }
+            : item
+        )
+      );
     } finally {
       // Remove from saving state
       setSavingItems(prev => {
@@ -391,6 +460,23 @@ export default function AgentStatus({ userId, onClose, initialChecklist, startSt
       const result = await response.json();
       console.log("[AgentModal] Checklist saved successfully:", result);
       
+      // Update the frontend checklist state with the checklistIds from backend
+      if (result.items && result.items.length > 0) {
+        const updatedChecklist = checklist.map((item, idx) => {
+          const savedItem = result.items[idx];
+          if (savedItem) {
+            return {
+              ...item,
+              checklistId: savedItem.checklistId,
+              moveId: savedItem.moveId || item.moveId
+            };
+          }
+          return item;
+        });
+        setChecklist(updatedChecklist);
+        console.log("[AgentModal] Updated frontend checklist with checklistIds:", updatedChecklist);
+      }
+      
       // Add success message to activity log with details
       addAIMessage(`✓ Checklist saved successfully as new record! (${result.items_saved} items)`);
       
@@ -447,6 +533,23 @@ export default function AgentStatus({ userId, onClose, initialChecklist, startSt
 
       const result = await response.json();
       console.log("[AgentModal] Checklist saved successfully:", result);
+      
+      // Update the frontend checklist state with the checklistIds from backend
+      if (result.items && result.items.length > 0) {
+        const updatedChecklist = checklist.map((item, idx) => {
+          const savedItem = result.items[idx];
+          if (savedItem) {
+            return {
+              ...item,
+              checklistId: savedItem.checklistId,
+              moveId: savedItem.moveId || item.moveId
+            };
+          }
+          return item;
+        });
+        setChecklist(updatedChecklist);
+        console.log("[AgentModal] Updated frontend checklist with checklistIds:", updatedChecklist);
+      }
       
       // Add success message to activity log with details
       addAIMessage(`✓ Checklist saved successfully as new record! (${result.items_saved} items)`);
