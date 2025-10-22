@@ -4,7 +4,7 @@ import { X, Send, Loader2 } from "lucide-react";
 interface ChecklistItem {
   id: string;
   title: string;
-  status: "pending" | "agent_done" | "user_done";
+  status: "todo" | "agentdone" | "manualdone";
   agent_label: string | null;
   detail?: string;
 }
@@ -30,6 +30,7 @@ interface AgentModalProps {
 
 export default function AgentStatus({ userId, onClose, initialChecklist, startStream = true }: AgentModalProps) {
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
+  const [savingItems, setSavingItems] = useState<Set<string>>(new Set());
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "1",
@@ -58,10 +59,10 @@ export default function AgentStatus({ userId, onClose, initialChecklist, startSt
         title: item.title,
         status:
           item.status === "agentdone"
-            ? "agent_done"
+            ? "agentdone"
             : item.status === "manualdone"
-            ? "user_done"
-            : "pending",
+            ? "manualdone"
+            : "todo",
         agent_label: null,
         detail: "",
       }));
@@ -170,7 +171,7 @@ export default function AgentStatus({ userId, onClose, initialChecklist, startSt
         const newChecklist = data.data.map((item: any, idx: number) => ({
           id: String(idx + 1),
           title: item.title,
-          status: item.status === "done" ? "agent_done" : "pending",
+          status: item.status === "done" ? "agentdone" : "todo",
           agent_label: item.agent_label,
           detail: item.detail || "",
         }));
@@ -186,7 +187,7 @@ export default function AgentStatus({ userId, onClose, initialChecklist, startSt
 
       case "agent_complete":
         addAIMessage(`✓ Completed: ${data.name || data.agent}`);
-        updateChecklistStatus(data.agent, "agent_done");
+        updateChecklistStatus(data.agent, "agentdone");
         break;
 
       case "complete":
@@ -195,6 +196,17 @@ export default function AgentStatus({ userId, onClose, initialChecklist, startSt
           addAIMessage("✓ Amazon address successfully updated!");
         }
         setIsRunning(false);
+        // Automatically save checklist when all tasks are completed
+        // Use checklist data from the completion message if available
+        if (data.data?.checklist && data.data.checklist.length > 0) {
+          console.log("[AgentModal] Using checklist from completion message:", data.data.checklist);
+          handleChecklistSaveWithData(data.data.checklist);
+        } else {
+          // Fallback to using state checklist
+          setTimeout(() => {
+            handleChecklistSave();
+          }, 100);
+        }
         break;
 
       case "error":
@@ -227,17 +239,37 @@ export default function AgentStatus({ userId, onClose, initialChecklist, startSt
     );
   };
 
-  const toggleChecklistItem = (id: string) => {
+  const toggleChecklistItem = async (id: string) => {
+    // Mark this item as saving
+    setSavingItems(prev => new Set(prev).add(id));
+    
     setChecklist((prev) =>
       prev.map((item) =>
         item.id === id
           ? {
               ...item,
-              status: item.status === "user_done" ? "pending" : "user_done",
+              status: item.status === "manualdone" ? "todo" : "manualdone",
             }
           : item
       )
     );
+    
+    // Auto-save the checklist when status changes
+    try {
+      await handleChecklistSave();
+      // Add subtle success message
+      addAIMessage("✓ Checklist updated and saved");
+    } catch (error) {
+      console.error("Failed to auto-save checklist:", error);
+      addAIMessage("❌ Failed to save changes. Please try again.");
+    } finally {
+      // Remove from saving state
+      setSavingItems(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(id);
+        return newSet;
+      });
+    }
   };
 
   const handleSendMessage = async () => {
@@ -302,13 +334,127 @@ export default function AgentStatus({ userId, onClose, initialChecklist, startSt
   };
 
   const getStrikethroughStyle = (status: ChecklistItem["status"]) => {
-    if (status === "agent_done") {
+    if (status === "agentdone") {
       return "line-through decoration-red-500 decoration-2";
     }
-    if (status === "user_done") {
+    if (status === "manualdone") {
       return "line-through decoration-blue-500 decoration-2";
     }
     return "";
+  };
+
+  // Save checklist to backend with provided data
+  const handleChecklistSaveWithData = async (checklistData: any[]) => {
+    try {
+      const token = localStorage.getItem("id_token");
+      if (!token) {
+        console.error("No authentication token found");
+        return;
+      }
+
+      console.log("[AgentModal] Saving checklist with provided data:", checklistData);
+      
+      if (checklistData.length === 0) {
+        console.warn("[AgentModal] Provided checklist is empty, skipping save");
+        addAIMessage("⚠️ No checklist items to save");
+        return;
+      }
+
+      const items = checklistData.map((item: any, idx: number) => ({
+        id: String(idx + 1),
+        title: item.title,
+        status: item.status === "done" ? "agentdone" : "todo",
+        agent_label: item.agent_label,
+        detail: item.detail || "",
+      }));
+
+      console.log("[AgentModal] Sending checklist items:", items);
+
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/save-checklist`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            checklist: items,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Failed to save checklist: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log("[AgentModal] Checklist saved successfully:", result);
+      
+      // Add success message to activity log with details
+      addAIMessage(`✓ Checklist saved successfully as new record! (${result.items_saved} items)`);
+      
+    } catch (error) {
+      console.error("[AgentModal] Failed to save checklist:", error);
+      addAIMessage("❌ Failed to save checklist. Please try again.");
+    }
+  };
+
+  // Save checklist to backend
+  const handleChecklistSave = async () => {
+    try {
+      const token = localStorage.getItem("id_token");
+      if (!token) {
+        console.error("No authentication token found");
+        return;
+      }
+
+      console.log("[AgentModal] Current checklist state:", checklist);
+      
+      if (checklist.length === 0) {
+        console.warn("[AgentModal] Checklist is empty, skipping save");
+        addAIMessage("⚠️ No checklist items to save");
+        return;
+      }
+
+      const items = checklist.map((item) => ({
+        id: item.id,
+        title: item.title,
+        status: item.status,
+        agent_label: item.agent_label,
+        detail: item.detail || "",
+      }));
+
+      console.log("[AgentModal] Sending checklist items:", items);
+
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/save-checklist`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            checklist: items,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Failed to save checklist: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log("[AgentModal] Checklist saved successfully:", result);
+      
+      // Add success message to activity log with details
+      addAIMessage(`✓ Checklist saved successfully as new record! (${result.items_saved} items)`);
+      
+    } catch (error) {
+      console.error("[AgentModal] Failed to save checklist:", error);
+      addAIMessage("❌ Failed to save checklist. Please try again.");
+    }
   };
 
   return (
@@ -354,12 +500,18 @@ export default function AgentStatus({ userId, onClose, initialChecklist, startSt
                     key={item.id}
                     className="flex items-start gap-3 p-3 rounded-lg hover:bg-gray-50 cursor-pointer transition group"
                   >
-                    <input
-                      type="checkbox"
-                      checked={item.status !== "pending"}
-                      onChange={() => toggleChecklistItem(item.id)}
-                      className="mt-1 w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-2 focus:ring-blue-500 cursor-pointer"
-                    />
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        checked={item.status === "manualdone" || item.status === "agentdone"}
+                        onChange={() => toggleChecklistItem(item.id)}
+                        disabled={savingItems.has(item.id)}
+                        className="mt-1 w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-2 focus:ring-blue-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      />
+                      {savingItems.has(item.id) && (
+                        <Loader2 className="absolute -top-1 -right-1 w-3 h-3 text-blue-600 animate-spin" />
+                      )}
+                    </div>
                     <div className="flex-1">
                       <div
                         className={`text-sm font-medium text-gray-900 ${getStrikethroughStyle(
@@ -373,9 +525,9 @@ export default function AgentStatus({ userId, onClose, initialChecklist, startSt
                           {item.detail}
                         </div>
                       )}
-                      {item.status !== "pending" && (
+                      {item.status !== "todo" && (
                         <div className="text-xs text-gray-500 mt-1">
-                          {item.status === "agent_done"
+                          {item.status === "agentdone"
                             ? "✓ Completed by AI"
                             : "✓ Manually completed"}
                         </div>

@@ -3,7 +3,7 @@ import os
 import json
 import requests
 from urllib.parse import urlencode
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from fastapi import FastAPI, HTTPException, Form, Depends, status
 from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -19,7 +19,6 @@ import re
 from dotenv import load_dotenv
 from agents.orchestrator_agent import run_orchestrator_agent
 from agents.agent_state import ChecklistItem
-from typing import Optional, List
 from fastapi.responses import StreamingResponse
 import asyncio
 
@@ -177,24 +176,33 @@ def save_checklist_to_db(user_id: str, move_id: str, checklist: List[Dict[str, A
         move_data: Move details (from/to addresses, dates)
     
     Returns:
-        The saved checklist item
+        The saved checklist items
     """
     
-    checklist_item = {
-        "userId": user_id,
-        "moveId": move_id,
-        "checklist": checklist,
-        "fromAddress": move_data.get("fromAddress", ""),
-        "toAddress": move_data.get("toAddress", ""),
-        "moveOutDate": move_data.get("moveOutDate", ""),
-        "moveInDate": move_data.get("moveInDate", ""),
-        "createdAt": datetime.utcnow().isoformat(),
-        "updatedAt": datetime.utcnow().isoformat()
-    }
+    saved_items = []
     
     try:
-        checklists_table.put_item(Item=checklist_item)
-        return checklist_item
+        # Save each checklist item individually with proper checklistId
+        for idx, item in enumerate(checklist):
+            checklist_id = f"{move_id}#cl{idx + 1}"
+            
+            checklist_item = {
+                "checklistId": checklist_id,
+                "moveId": move_id,
+                "title": item.get("title", ""),
+                "status": item.get("status", "todo"),
+                "agent_label": item.get("agent_label"),
+                "detail": item.get("detail", ""),
+                "createdAt": datetime.utcnow().isoformat(),
+                "updatedAt": datetime.utcnow().isoformat()
+            }
+            
+            checklists_table.put_item(Item=checklist_item)
+            saved_items.append(checklist_item)
+            
+        print(f"[Backend] Successfully saved {len(saved_items)} checklist items")
+        return {"items": saved_items, "count": len(saved_items)}
+        
     except Exception as e:
         print(f"Failed to save checklist to database: {str(e)}")
         raise
@@ -1056,6 +1064,107 @@ def delete_move_and_checklist(move_id: str, current_user: dict = Depends(get_cur
         raise HTTPException(status_code=500, detail=f"Failed to delete checklist items: {str(e)}")
 
     return {"message": "Move and associated checklist items deleted successfully.", "moveId": move_id}
+
+# --- SAVE CHECKLIST ---
+class SaveChecklistRequest(BaseModel):
+    checklist: List[Dict[str, Any]]
+    move_id: Optional[str] = None
+
+@app.post("/save-checklist")
+def save_checklist(
+    data: SaveChecklistRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Save checklist data to the database.
+    Creates a NEW move record with the checklist data.
+    """
+    try:
+        user_id = current_user.get("sub")
+        print(f"[Backend] Received save-checklist request for user {user_id}")
+        print(f"[Backend] Checklist data: {data.checklist}")
+        
+        # Validate checklist data
+        if not data.checklist:
+            print("[Backend] Empty checklist received, returning error")
+            raise HTTPException(
+                status_code=400,
+                detail="Checklist cannot be empty"
+            )
+        
+        # Create a NEW move record with timestamp-based unique ID
+        current_time = datetime.utcnow()
+        timestamp_str = current_time.strftime("%Y%m%d_%H%M%S")
+        new_move_id = f"{user_id}#{timestamp_str}"
+        
+        # Get move data from the latest move to use as template
+        move_data = {}
+        if data.move_id:
+            # Use provided move_id to get move data
+            response = moves_table.query(
+                KeyConditionExpression="userId = :uid AND moveId = :mid",
+                ExpressionAttributeValues={":uid": user_id, ":mid": data.move_id}
+            )
+            
+            if response.get("Items"):
+                move = response["Items"][0]
+                move_data = {
+                    "fromAddress": move.get("fromAddress", ""),
+                    "toAddress": move.get("toAddress", ""),
+                    "moveOutDate": move.get("moveOutDate", ""),
+                    "moveInDate": move.get("moveInDate", "")
+                }
+        else:
+            # Get latest move for this user to use as template
+            response = moves_table.query(
+                KeyConditionExpression="userId = :uid",
+                ExpressionAttributeValues={":uid": user_id},
+                ScanIndexForward=False,
+                Limit=1
+            )
+            
+            if response.get("Items"):
+                move = response["Items"][0]
+                move_data = {
+                    "fromAddress": move.get("fromAddress", ""),
+                    "toAddress": move.get("toAddress", ""),
+                    "moveOutDate": move.get("moveOutDate", ""),
+                    "moveInDate": move.get("moveInDate", "")
+                }
+        
+        # Create NEW move record
+        new_move_record = {
+            "userId": user_id,
+            "moveId": new_move_id,
+            "fromAddress": move_data.get("fromAddress", ""),
+            "toAddress": move_data.get("toAddress", ""),
+            "moveOutDate": move_data.get("moveOutDate", ""),
+            "moveInDate": move_data.get("moveInDate", ""),
+            "createdAt": current_time.isoformat(),
+            "updatedAt": current_time.isoformat()
+        }
+        
+        # Save the new move record
+        moves_table.put_item(Item=new_move_record)
+        print(f"[Backend] Created new move record: {new_move_id}")
+        
+        # Save checklist items using the new move_id
+        saved_result = save_checklist_to_db(user_id, new_move_id, data.checklist, move_data)
+        
+        return {
+            "message": "Checklist saved successfully as new record",
+            "move_id": new_move_id,
+            "items_saved": saved_result.get("count", 0),
+            "saved_at": current_time.isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save checklist: {str(e)}"
+        )
 
 # --- CHAT WITH AGENT ---
 class ChatMessage(BaseModel):
