@@ -36,7 +36,8 @@ export default function ChecklistCard({
 
     try {
       const token = localStorage.getItem("id_token");
-      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/checklist/${checklistId}`, {
+      const encodedId = encodeURIComponent(checklistId);
+      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/move/${encodedId}`, {
         method: "DELETE",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -45,7 +46,7 @@ export default function ChecklistCard({
 
       if (!res.ok) throw new Error("Failed to delete checklist");
       if (onDelete) onDelete(checklistId);
-      alert("Checklist deleted successfully.");
+      alert("Move and checklist deleted successfully.");
     } catch (err) {
       console.error("Error deleting checklist:", err);
       alert("Failed to delete checklist.");
