@@ -18,7 +18,8 @@ AVAILABLE_AGENTS = [
     ("subscriptions_update", "Update subscriptions / newspapers / magazines"),   # future
 ]
 
-SYSTEM = """You are the Checklist/Planning Agent for move-out workflows.
+SYSTEM = """
+You are the Checklist/Planning Agent for move-out workflows.
 Given user details and the available agents (capabilities) below, produce a task checklist.
 Each task SHOULD be specific and, where applicable, assign `agent_label` to the agent best suited to complete it.
 If no agent fits yet, set agent_label=null.

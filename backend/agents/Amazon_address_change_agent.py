@@ -37,7 +37,8 @@ class AddressDecision(BaseModel):
     )
 
 
-SUPERVISOR_SYSTEM = """You are the Amazon Address Change Agent controller.
+SUPERVISOR_SYSTEM = """
+You are the Amazon Address Change Agent controller.
 Your job: decide if we have enough information to call the tool `update_amazon_address`.
 - Prefer `user_details.to_address` as the new address when present.
 - Otherwise extract a reasonable new address from recent messages if unambiguous.

@@ -5,7 +5,7 @@ import Input from "../../components/input";
 import Modal from "../../components/modal";
 import Notification from "../../components/notification";
 import { useUser } from "../../context/user.tsx";
-import { authService, ApiError } from '../../services/auth';
+import { authService, ApiError } from '../../services/authService.ts';
 
 
 export default function SignIn() {

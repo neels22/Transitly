@@ -4,7 +4,7 @@ import Button from "../../components/button";
 import Input from "../../components/input";
 import Modal from "../../components/modal";
 import Notification from "../../components/notification";
-import { authService, ApiError } from '../../services/auth';
+import { authService, ApiError } from '../../services/authService.ts';
 
 export default function ConfirmEmail() {
   const [confirmationCode, setConfirmationCode] = useState('');

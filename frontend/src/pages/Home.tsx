@@ -3,13 +3,14 @@ import DatePicker from "react-datepicker";
 import Input from "../components/input";
 import Notification from "../components/notification";
 import AgentModal from "../components/agents/AgentStatus";
-import { ApiError } from "../services/move";
+import { ApiError } from "../services/moveService.ts";
 import goButton from "../../assets/go-button.svg";
 import locationIcon from "../../assets/location.svg";
 import calendarIcon from "../../assets/calendar.svg";
 import artwork from "../../assets/artwork.png";
 import AddressAutocomplete from "../components/address/AddressAutoComplete";
 import { ChecklistCard } from "../components/chatcard";
+import { MoveEndpoints } from "../services/endpoints";
 
 const Field = ({
   icon,
@@ -69,7 +70,7 @@ export default function Home() {
       try {
         const token = localStorage.getItem("id_token");
         const res = await fetch(
-          `${import.meta.env.VITE_API_BASE_URL}/checklists?userId=${userId}`,
+          `${import.meta.env.VITE_API_BASE_URL}${MoveEndpoints.CHECKLISTS}?userId=${userId}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
         if (!res.ok) throw new Error("Failed to fetch checklists");
@@ -87,7 +88,7 @@ export default function Home() {
     if (!isSignedIn) return;
     try {
       const token = localStorage.getItem("id_token");
-      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/checklists?userId=${userId}`, {
+      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}${MoveEndpoints.CHECKLISTS}?userId=${userId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error("Failed to fetch checklists");
@@ -146,7 +147,7 @@ export default function Home() {
 
     setIsLoading(true);
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/move`, {
+      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}${MoveEndpoints.SUBMIT_MOVE}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
